@@ -2,12 +2,14 @@
   "schema": 1,
   "version": "2.1.1",
   "minShellVersion": "2.1.0",
-  "commit": "",
-  "releasedAt": "2026-09-09T00:00:00Z",
-  "notes": ["White login form with blue text"],
+  "commit": "97e6c366549ea1fe14c4f262add43073b2e099f9",
+  "releasedAt": "2026-09-09T10:12:34.801Z",
+  "notes": [
+    "White login form with blue text"
+  ],
   "payload": {
     "url": "https://github.com/IsraelSoftTech/vti-desktop/releases/download/desktop-2.1.1/mpasat-desktop-payload-2.1.1.zip",
-    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-    "sizeBytes": 0
+    "sha256": "deaf4853be1943e01a17b0457f39d1d8efd30223e97f9bbbad9d362237be488a",
+    "sizeBytes": 1336688
   }
 }
