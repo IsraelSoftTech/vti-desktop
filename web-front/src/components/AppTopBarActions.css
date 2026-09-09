@@ -1,0 +1,58 @@
+.app-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.app-top-actions__btn {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s ease;
+}
+
+.app-top-actions__btn--on-gradient {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--color-white);
+}
+
+.app-top-actions__btn--on-gradient:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.app-top-actions__btn--on-light {
+  background: var(--color-background);
+  color: var(--color-text);
+}
+
+.app-top-actions__btn--on-light:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.app-top-actions__badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--color-accent-peach);
+  color: var(--color-white);
+  font-size: 9px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border: 1.5px solid var(--color-primary-dark);
+  line-height: 1;
+}

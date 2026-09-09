@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "661195552415",
+    "project_id": "mpasat-df317",
+    "storage_bucket": "mpasat-df317.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:661195552415:android:df85bd17ab6e8875f694aa",
+        "android_client_info": {
+          "package_name": "com.vtispace.mpasat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC2o9CLUucApqgloyY1T89GpwzLLA0t9GQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

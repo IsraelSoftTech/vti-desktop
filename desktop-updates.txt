@@ -1,0 +1,440 @@
+DESKTOP SOFTWARE UPDATES — IMPLEMENTATION ALGORITHM
+===================================================
+Written: 2026-09-09
+Status: spec — implement from this file
+Scope: Windows desktop app only (Electron + local Express + SQLite).
+       Admin and accountant share one binary. There is no per-role
+       "Software Updates" page. The check runs on every launch, before
+       the login screen, when the PC is online.
+
+This is NOT cloud data sync.
+  Data sync  = school records (students, fees, attendance) via
+               /api/desktop/pull-now and the existing sync engine.
+  Software   = app code (screens, routes, nav, SQLite schema helpers)
+               published from GitHub so a new feature appears on the
+               school PC without reinstalling the .exe.
+
+
+RULES (LOCKED)
+--------------
+1. Do not add a Software Updates module in Admin or Accountant nav.
+2. Boot order, online only:
+     start local API
+     → data sync
+     → software-update check
+     → if updates found: Update Now | Skip
+     → login
+3. Offline (no internet): skip data sync and skip software check.
+   Open login immediately. Local SQLite still works.
+4. Skip is this launch only. Next launch checks GitHub again.
+5. Software update must never wipe, replace, or rewrite school data
+   (data.sqlite, media, secrets.json, sync_meta, device_token).
+6. Do not git-pull source onto the school PC. The installed app serves
+   the built UI (web-front/dist) and packaged mobile-back JS. School
+   PCs do not have git, Node, or a Vite build. GitHub is the publish
+   source; the PC downloads a prebuilt payload.
+7. Electron shell (electron/main.js, native better-sqlite3) stays in
+   the installer. Feature updates overlay UI + JS only. If the shell
+   itself must change, ship a new .exe (see §10).
+8. Reuse the existing DesktopStartupSync look (centered card, cool
+   spinner, same colors). Extend it; do not invent a second splash.
+
+
+0. WHY A RAW GIT PULL CANNOT BE THE APPLY STEP
+----------------------------------------------
+Today the packaged app loads:
+
+  backend  desktop/electron/main.js  →  mobile-back/serverDesktop.js
+  UI       Express static             →  web-front/dist  (copied to ui/)
+
+Those files live inside app.asar (read-only). A Timetable .tsx sitting
+in a git checkout would never appear, because the window does not run
+Vite source.
+
+Correct model:
+
+  GitHub  = source of truth + CI that builds a payload zip
+  PC      = downloads that zip into a writable overlay, then reloads
+
+
+1. WHAT EXISTS TODAY (BASELINE)
+-------------------------------
+  desktop/package.json              version 2.1.0
+  desktop/electron/main.js          starts API, opens window at API url
+  desktop/electron/preload.js       window.mpasatDesktop.runtime = desktop
+  mobile-back/serverDesktop.js      SQLite + /api/attendance + /api/desktop
+  mobile-back/sync/engine.js        cloud pull/push (school data)
+  mobile-back/sync/desktopRoutes.js /sync-status /pull-now /upload /connect
+  web-front/src/App.tsx             login first; DesktopStartupSync wraps
+                                    AdminApp/AccountantApp AFTER login
+  web-front/src/components/DesktopStartupSync.tsx
+                                    "Syncing updates" spinner, then
+                                    "Sync Done", then the signed-in app
+
+Change required: move the boot gate in front of LoginScreen. Data sync
+must not require a staff password at boot. If the device is already
+paired (sync_meta.device_token), pullFromCloud uses that token. If not
+paired, skip data sync and continue to the software check.
+
+
+2. PAYLOAD vs SHELL
+-------------------
+SHELL (installer, rarely changed)
+  electron/main.js, preload.js
+  node_modules/better-sqlite3 (native)
+  electron-builder NSIS .exe
+
+PAYLOAD (this feature updates this)
+  ui/                 built web-front (desktop Vite build)
+  mobile-back/**/*.js attendance API, initSqlite, routes, sync helpers
+  software-manifest.json  (copied into the payload)
+
+OVERLAY (writable, per PC)
+  %APPDATA%\MPASAT Attendance\software\
+    state.json          installedVersion, installedCommit, justApplied
+    current\            active payload (ui + mobile-back)
+    previous\           last good payload (rollback)
+    staging\            download/extract in progress
+
+main.js path resolution (packaged):
+
+  function payloadRoot():
+    overlay = userData/software/current
+    if overlay has ui/index.html AND mobile-back/serverDesktop.js:
+      return overlay
+    return bundled asar paths (first install, or overlay missing)
+
+  backendEntry() = payloadRoot()/mobile-back/serverDesktop.js
+  uiDir()        = payloadRoot()/ui
+
+Dev (unpackaged) keeps current behaviour: repo web-front/dist +
+repo mobile-back. Overlay is packaged-only.
+
+
+3. GITHUB PUBLISH PIPELINE (developer side)
+-------------------------------------------
+Repo: the desktop product repo (desktop/ + the mobile-back and
+web-front files the desktop build already packs).
+
+Canonical manifest (committed, also copied into every payload):
+
+  desktop/software-manifest.json
+  {
+    "schema": 1,
+    "version": "2.2.0",          // semver, bump for every shippable feature
+    "minShellVersion": "2.1.0",  // desktop/package.json version of the .exe
+    "commit": "<git sha>",
+    "releasedAt": "2026-09-09T08:00:00Z",
+    "notes": ["Timetable Module"],
+    "payload": {
+      "url": "https://github.com/<owner>/<repo>/releases/download/desktop-2.2.0/mpasat-desktop-payload-2.2.0.zip",
+      "sha256": "<hex>",
+      "sizeBytes": 0
+    }
+  }
+
+On every push that changes desktop-relevant paths
+(web-front, mobile-back attendance JS, desktop/electron, desktop/software-manifest.json):
+
+  A. npm --prefix web-front run build:desktop
+  B. Stage payload folder:
+       ui/            ← web-front/dist
+       mobile-back/   ← same filter as electron-builder files
+                        (**/*.js, exclude scripts, .env, node_modules)
+       software-manifest.json
+  C. Zip → mpasat-desktop-payload-{version}.zip
+  D. sha256 the zip; write it into the manifest payload.sha256
+  E. GitHub Release tag desktop-{version}, attach the zip
+  F. Keep software-manifest.json on the default branch so the PC can
+     fetch it with a simple HTTPS GET (raw.githubusercontent.com or
+     the GitHub Releases latest manifest URL).
+
+Do not publish secrets, .env, node_modules, or school data.
+
+Local version file on the PC (state.json) starts as the bundled
+desktop/package.json version (2.1.0) until the first overlay apply.
+
+
+4. VERSION COMPARE
+------------------
+  local  = state.json.installedVersion  else  desktop/package.json version
+  remote = manifest.version
+
+  updatesFound  = semver(remote) > semver(local)
+               OR (equal version AND remote.commit != local.installedCommit)
+
+  if remote.minShellVersion > shellVersion (package.json of the running
+     Electron app, not the overlay):
+       treat as "installer required"
+       copy: "This update needs a new MPASAT installer."
+       buttons: Skip only (do not offer Update Now)
+       never try to overlay a payload the current .exe cannot run
+
+
+5. BOOT GATE (UI) — BEFORE LOGIN
+--------------------------------
+Replace the post-login-only DesktopStartupSync with one gate in App.tsx:
+
+  Root:
+    if not desktop runtime: existing web behaviour (login / shells)
+    else: <DesktopBootGate />
+            children = login or signed-in app as today
+
+DesktopBootGate is a full-screen card (reuse DesktopStartupSync.css).
+Show the running version under the title, e.g. "Version 2.1.0".
+This is the version surface (admin and accountant both see it here;
+no extra page).
+
+Phases (strict order):
+
+  P0  decide online
+  P1  data sync          "Syncing updates"
+  P2  software check     "Checking for software updates"  + cool spinner
+  P3  decision
+        none             → login
+        found            → "Updates Found" + notes + Update Now + Skip
+        installer-needed → message + Skip
+  P4  applying           spinner + "Updating software…"
+  P5  done               "Software Updates Done"  (short pause)
+  P6  login
+
+Offline short-circuit (P0):
+  navigator.onLine === false
+  OR a 3–4s HEAD/GET to GitHub manifest AND cloud /health both fail
+  → skip P1–P5, open login. No error dialog required.
+
+Do not show login underneath the gate. The gate is the first screen.
+
+
+6. ALGORITHM — P1 DATA SYNC (EXISTING ENGINE)
+---------------------------------------------
+This is the current school-server pull. Do not invent a second sync.
+
+  if not paired (no device_token): skip P1, go to P2
+  POST /api/desktop/pull-now  with empty body
+    engine uses device_token; do not require username/password at boot
+  skipped=offline or network error:
+    if still online, show Continue (same as today's error card)
+    then still run P2 (software check is independent)
+  success: "Sync Done" (keep the existing short pause), then P2
+
+Never call software apply during an in-flight pull/push.
+
+
+7. ALGORITHM — P2 SOFTWARE CHECK
+--------------------------------
+Runs in Electron main process (can write userData, not blocked by asar).
+Renderer asks via preload IPC. Do not download the zip during check.
+
+  IPC  software:check  →
+
+  1. GET manifestUrl  (timeout ~8s)
+     manifestUrl is baked into the build, e.g.
+       https://raw.githubusercontent.com/<owner>/<repo>/<branch>/desktop/software-manifest.json
+  2. Validate schema === 1, version, payload.url, payload.sha256
+  3. Compare with state.json as in §4
+  4. Return {
+       currentVersion, remoteVersion, notes[],
+       status: "upToDate" | "updatesFound" | "installerRequired" | "checkFailed"
+     }
+
+  checkFailed (timeout, 404, malformed):
+    do not block the school. Show nothing. Go to login.
+    Software check is best-effort.
+
+  upToDate → P6 login
+  updatesFound → P3 card:
+    title   Updates Found
+    copy    remote.notes joined, plus "Version {local} → {remote}"
+    buttons Update Now    Skip
+  installerRequired → message + Skip only
+
+
+8. ALGORITHM — P4 APPLY (Update Now)
+------------------------------------
+IPC  software:apply  → main process only. One apply at a time.
+
+  1. Re-fetch manifest (in case the check is stale). Abort if no longer newer.
+  2. Empty and recreate userData/software/staging
+  3. Download payload.url to staging/payload.zip
+     timeout generous (feature zips can be several MB)
+     renderer may show "Updating software…" the whole time
+  4. sha256(staging/payload.zip) must equal manifest.payload.sha256
+     mismatch → delete staging, return error, keep current software
+  5. Extract zip to staging/unpacked
+     required layout inside zip (with or without a single root folder):
+       ui/index.html
+       mobile-back/serverDesktop.js
+       software-manifest.json
+     reject zip slip (no paths outside staging/unpacked)
+  6. STOP the local Express server (existing stop() in main.js)
+     do not quit the BrowserWindow yet
+  7. Atomic swap:
+       if current/ exists:  rename current → previous (replace old previous)
+       rename staging/unpacked → current
+       write state.json:
+         installedVersion, installedCommit, justApplied=true
+       delete staging
+  8. START the API again using payloadRoot() (now the overlay)
+     initSqlite() runs on start. New CREATE TABLE IF NOT EXISTS and
+     additive ALTERs in the new initSqlite.js are how a Timetable
+     (or any) schema lands. Idempotent only. No DROP of existing tables.
+  9. Reload the BrowserWindow onto the new API url
+ 10. Return ok to the new renderer
+
+On any failure after step 6:
+  restore previous → current if previous exists
+  restart API from payloadRoot()
+  keep the window
+  show Continue → login on the old software
+
+Do not apply a payload that is missing ui/ or serverDesktop.js.
+
+
+9. ALGORITHM — P5 DONE THEN LOGIN
+---------------------------------
+After reload, DesktopBootGate reads state.json.justApplied
+(IPC software:status):
+
+  if justApplied:
+    show "Software Updates Done" + checkmark (~1.4s, same as Sync Done)
+    clear justApplied
+    skip P1 and P2 this launch (already synced; already on new version)
+    open login
+
+  LoginScreen is unchanged. After sign-in, do NOT run the old
+  DesktopStartupSync again (the boot gate already did data sync).
+  Remove the post-login wrapper from App.tsx so sync is not doubled.
+
+Skip button:
+  do not write a permanent skip
+  do not download
+  open login on the current payload
+
+
+10. WHEN THE .exe IS STILL REQUIRED
+-----------------------------------
+Overlay CAN ship: new screens, nav items, API routes, SQLite columns
+and tables added in initSqlite, CSS, copy, bugfixes in JS.
+
+Overlay CANNOT ship: Electron upgrades, better-sqlite3 rebuilds,
+new native addons, changes to main.js that the old shell does not
+know how to run.
+
+Those bump minShellVersion and require MPASAT-Attendance-Setup-{ver}.exe.
+The boot card tells the user; it never bricks the overlay trying.
+
+
+11. WORKED EXAMPLE — TIMETABLE MODULE
+-------------------------------------
+Developer:
+  1. Add mobile-back timetable tables in initSqlite.js
+       CREATE TABLE IF NOT EXISTS attendance_timetable_...
+       add to SYNC_TABLES only if the cloud schema is ready; otherwise
+       desktop-only until cloud migrate exists
+  2. Add routes.js endpoints
+  3. Add web-front screens + adminNav / AdminApp (and accountantNav
+     only if accountants should see it)
+  4. Bump desktop/software-manifest.json version 2.1.0 → 2.2.0
+     notes: ["Timetable Module"]
+  5. Push. CI builds payload zip and GitHub Release.
+
+School PC (online), still on 2.1.0 overlay or bundled:
+  launch
+  → Syncing updates          (records from school server)
+  → Checking for software updates
+  → Updates Found
+       Timetable Module
+       Version 2.1.0 → 2.2.0
+       [Update Now]  [Skip]
+  Update Now
+  → spinner, zip download, verify, swap overlay, restart API
+     initSqlite creates timetable tables
+     new ui/ bundle includes Timetable in admin nav
+  → Software Updates Done
+  → Login
+
+  Admin logs in  → Timetable is in the shell
+  Accountant logs in → sees it only if that nav was included; otherwise
+                       the code is on disk but hidden by role (same as
+                       Messages/Settings today)
+
+  Skip
+  → Login on 2.1.0. No Timetable. Next launch offers 2.2.0 again.
+
+Offline launch:
+  → Login on whatever is already installed. No GitHub call.
+
+
+12. FILES TO TOUCH
+------------------
+NEW
+  desktop/software-manifest.json
+  desktop/electron/softwareUpdate.js     check, download, verify, swap
+  web-front/src/components/DesktopBootGate.tsx   (extends/replaces
+                                         DesktopStartupSync)
+  .github/workflows/desktop-payload.yml  build zip + release
+
+CHANGE
+  desktop/electron/main.js
+    payloadRoot(), stop+restart API, IPC handlers, prefer overlay
+  desktop/electron/preload.js
+    expose software:check / apply / status (no Node in the renderer)
+  web-front/src/App.tsx
+    DesktopBootGate before login; remove post-login DesktopStartupSync
+  mobile-back/sync/engine.js  and/or desktopRoutes.js
+    boot pull allowed with device_token only (no staff password)
+  desktop/package.json
+    keep version in lockstep with minShellVersion when the .exe changes
+
+DO NOT
+  put GitHub credentials in the renderer
+  run git on the school PC
+  overwrite userData/data.sqlite or media/
+  add Software Updates to adminNav.ts or accountantNav.ts
+
+
+13. SECURITY AND SAFETY
+-----------------------
+  • HTTPS only to GitHub.
+  • sha256 required; never apply an unverified zip.
+  • Reject path traversal in the zip.
+  • Optional later: minisign/GPG. Not required for v1 if the release
+    is on a repo only the product owners can push to.
+  • If the updates repo is private, use a read-only token in main.js
+    via env or secrets.json, never in the Vite bundle.
+  • Prefer a public repo that contains only payload zips + manifest
+    (no school data, no JWT secrets).
+  • Single-instance lock already in main.js: second launch focuses
+    the window; do not start a second apply.
+
+
+14. IMPLEMENTATION ORDER
+------------------------
+  1. Overlay path resolution in main.js (still using bundled files
+     until an overlay exists). Restart-API helper.
+  2. softwareUpdate.js + preload IPC + manifest fetch (check only).
+  3. DesktopBootGate: P0 → P1 (move existing data sync here) → P2/P3
+     → Skip → login. App.tsx wiring. Confirm offline still logs in.
+  4. Apply path: download, hash, extract, swap, restart, justApplied,
+     "Software Updates Done".
+  5. CI workflow that builds and publishes the payload zip.
+  6. Rollback test + Timetable-style smoke (see checks below).
+
+
+CHECKS AFTER EACH STEP
+----------------------
+  Wi-Fi off: app opens on login, no spinner trap.
+  Wi-Fi on, unpaired: skip data sync, software check still runs.
+  Wi-Fi on, paired: records pull, then software check, then login.
+  Up to date: check spinner, then login, no Update Now.
+  Updates Found → Skip: login on old UI; feature absent.
+  Updates Found → Update Now: overlay current/ populated, state.json
+    version matches manifest, login works, new nav/feature visible
+    for the role that should see it.
+  Kill network mid-download: previous payload restored, login works.
+  Bad sha256: overlay unchanged, login works.
+  After apply, sqlite school rows still present (count students/fees
+    before and after).
+  Second launch after apply: check says up to date, login.
+  Web app (non-desktop): unchanged, no boot gate.

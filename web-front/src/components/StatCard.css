@@ -1,0 +1,116 @@
+.stat-card {
+  position: relative;
+  flex: 1 1 calc(50% - 7px);
+  min-width: min(100%, 160px);
+  background: var(--color-surface);
+  border: none;
+  border-radius: var(--radius-2xl);
+  padding: var(--space-4) var(--space-4) calc(var(--space-4) + 4px);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  transition: box-shadow var(--transition-base), transform var(--transition-base);
+}
+
+.stat-card:hover {
+  box-shadow: var(--shadow-lg);
+}
+
+.stat-card--skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stat-card__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: auto;
+  width: auto;
+  height: 4px;
+  border-radius: 0 0 var(--radius-2xl) var(--radius-2xl);
+}
+
+.stat-card__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-3);
+}
+
+.stat-card__value {
+  margin: 0;
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-extrabold);
+  color: var(--color-text);
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.stat-card__label {
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.stat-card__sk-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-soft);
+}
+
+.stat-card__sk-line {
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+}
+
+.stat-card__sk-line--lg {
+  width: 55%;
+  height: 28px;
+}
+
+.stat-card__sk-line--sm {
+  width: 70%;
+  height: 14px;
+  border-radius: 6px;
+  background: var(--color-border);
+}
+
+.stat-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.stat-grid__full {
+  flex: 1 1 100%;
+  width: 100%;
+}
+
+.stat-grid__full .stat-card {
+  flex: 1 1 100%;
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .stat-card {
+    flex: 1 1 calc(33.333% - 10px);
+  }
+
+  .stat-card--wide {
+    flex: 1 1 100%;
+  }
+}
+
+@media (min-width: 1024px) {
+  .stat-grid__full {
+    flex: 1 1 calc(33.333% - 10px);
+    width: auto;
+  }
+}

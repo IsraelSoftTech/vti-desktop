@@ -1,0 +1,758 @@
+Accountant + consistency updates — algorithm
+=============================================
+Written: 2026-08-19
+Status: spec — implement from this file
+Scope: staff features on cloud API, web, mobile, and desktop.
+       Parent access stays mobile-only (Part B of update.txt). Do not
+       port parent login, barcode linking, parent chat, or parent fees
+       to web or desktop.
+
+
+Rules (locked)
+--------------
+1. SAME IMPLEMENTATION on mobile app, web, and desktop for every
+   change in this file. One API contract. One field set. One
+   validation rule. One print layout. If a behaviour exists for the
+   accountant on one client, it exists on all three.
+
+2. Desktop is the same web-front UI talking to the local Express +
+   SQLite copy of mobile-back. Do not invent a second discount search,
+   a second student form, or a second payment payload for Electron.
+
+3. Parent role (attendance_parent) exists only on the mobile app.
+   Staff features below never open the parent shell.
+
+4. Cameroon clock stays Africa/Douala, HH:mm, amounts in the same
+   currency formatter already used by fee screens.
+
+5. Do not keep a platform fork “for now”. If desktop SQLite cannot
+   run a Postgres idiom (ILIKE, NOT NULL on unresolved FK), fix the
+   shared dialect / sync layer so all clients observe the same result.
+
+6. SAME UI SCHEME on mobile, web, and desktop. Source of truth is
+   the current mobile app (mobile-front theme + chrome). Web and
+   desktop must use that palette, header, cards, buttons, fields,
+   and light/dark toggle — not the existing web bright-blue look.
+   New screens in this file ship in that scheme; existing staff
+   screens are restyled to match. Print/PDF stays black-on-white.
+
+
+0. What exists today (baseline)
+-------------------------------
+Accountant shell (web + desktop AccountantApp, mobile AccountantTabs):
+  Home, Management, Payment, Check, Discount, Reports.
+  No Students module. No change-password. Account menu is name + logout.
+
+Student create/update:
+  POST/PATCH /students is requireAdmin() only.
+  validateStudentRegistration(..., { requirePhoto: true }).
+  Web/mobile registration tabs refuse submit without a photo.
+  Bulk Excel upload already allows missing photos.
+
+Fee payments:
+  attendance_fee_payments has amount, note, paid_at. No cash/bank.
+  Reports tab only prints the class fee list (expected / discount /
+  paid / balance). No tender split.
+
+Desktop sync:
+  Pull/snapshot applyMutation can INSERT attendance_absence_days with
+  student_id NULL when the student UUID does not resolve. SQLite then
+  raises: NOT NULL constraint failed: attendance_absence_days.student_id
+
+Desktop discount search:
+  Same FeeDiscountScreen as web. Search hits
+  GET /fees/students/search?q=. Results can appear as blank-name rows
+  in Electron even though mobile/web show fullName. Root causes to
+  close together: SQLite has no ILIKE; Electron <button> UA colour;
+  mapper must not depend on a single column casing.
+
+UI scheme (mismatch to close):
+  Mobile: navy #1E3A8A / #182E6E, gray canvas #F0F1F2, text #565B66,
+          amber #F59E0B, rounded navy header, pill buttons, light/dark.
+  Web + desktop today: bright blue #2D5BFF, indigo wash #EEF2FF, slate
+          text, sidebar-only chrome, no dark mode.
+  After this spec those two palettes must not coexist.
+
+
+========================================================
+PART 0 — UI scheme (mobile is the source of truth)
+========================================================
+
+Every staff screen on web and desktop must look like the current
+mobile app: same colours, same header language, same cards, same
+controls. Desktop inherits this automatically once web-front matches
+mobile, because Electron loads web-front.
+
+Phone keeps bottom tabs. Web/desktop keep a persistent side nav for
+wide windows (and a drawer under ~1024px). That is a layout
+adaptation, not a second visual identity. Colours, header, cards,
+and controls stay the mobile scheme on all three.
+
+Parent shell is already on mobile and already uses this scheme.
+Do not restyle parent independently. Do not add parent chrome to
+web or desktop.
+
+
+U0. Token source
+----------------
+Single palette: mobile-front/src/theme/colors.ts
+  lightColors  and  darkColors
+
+Copy those hex values into web-front/src/theme/colors.css as CSS
+variables. Do not approximate. Do not keep #2D5BFF / #1A53FF /
+#EEF2FF / teal #0D9488 as brand colours.
+
+  Light (must match lightColors):
+    --color-background       #F0F1F2
+    --color-background-alt   #F9FAFB
+    --color-surface          #FFFFFF
+    --color-primary          #1E3A8A
+    --color-primary-dark     #182E6E
+    --color-primary-soft     #E9EBF3
+    --color-primary-200      #DDE1ED
+    --color-primary-800      #122353
+    --color-secondary        #F59E0B
+    --color-secondary-soft   #FEF7E7
+    --color-text             #565B66
+    --color-text-sub         #606773
+    --color-text-muted       #6B7280
+    --color-border           #D1D3D8
+    --color-border-strong    #D1D5DB
+    --color-danger           #DC2626
+    --color-danger-soft      #FEF2F2
+    --color-success          #16A34A
+    --color-success-soft     #F0FDF4
+    --color-warning          #F97316
+    --color-accent-teal      #16A34A
+    --color-accent-teal-soft #F0FDF4
+    --color-accent-peach     #F59E0B
+    --color-accent-peach-soft #FEF7E7
+    --color-accent-purple    #1E3A8A
+    --color-white            #FFFFFF
+    --color-shadow           rgba(30, 58, 138, 0.12)
+    --color-header-start     #1E3A8A
+    --color-header-end       #182E6E
+
+  Dark: same keys as darkColors (#0B1220 canvas, #162033 surface,
+  #93B4FF primary, #E5E7EB text, #2A3A55 border, …).
+
+  html[data-theme="dark"]  (or body.theme-dark) swaps the variables.
+  Default scheme is light, same as mobile.
+
+Shadows on web/desktop use the navy-tinted --color-shadow, not the
+old bright-blue glow. Page background is flat --color-background.
+Drop the indigo radial wash in index.css.
+
+
+U1. Light / dark (all three clients)
+------------------------------------
+Mobile already has ThemeToggle on AppTopBar (sunny / moon, amber
+active pill, stored as appearance_theme).
+
+Web and desktop:
+  Same control in the navy header, same icons, same amber active
+  state.
+  Persist "light" | "dark" in localStorage key appearance_theme
+  (same name as mobile).
+  Apply data-theme on <html> before first paint to avoid a flash.
+  Login screen also shows the toggle (mobile login already does).
+
+Parent: keep the existing mobile toggle. No extra work.
+
+
+U2. Chrome
+----------
+Header (every signed-in staff screen, all clients):
+  Navy gradient headerStart → headerEnd (#1E3A8A → #182E6E).
+  Bottom corners radius 24px.
+  Left: shield mark in a light rounded square, “MPASAT”, subtitle
+    (“Attendance System” / “Fee management” / role tag).
+  Right: ThemeToggle, then account/profile (and notifications where
+    the screen already has them).
+  Status bar / window caption: light icons on navy.
+  Account menu card: white/surface, name, @user · role, Change
+  password, Logout — same stack as mobile AppTopBar menu.
+
+Web/desktop today use a pale page header + sidebar brand. Replace
+the pale header with this navy bar. Sidebar (wide) / drawer (narrow)
+stays for navigation only: white/surface, navy labels, active item
+uses primarySoft background + primary colour, same icons as mobile
+tabs (home, people, school, clipboard, cash, pricetag, …).
+
+Phone: keep the existing bottom tab bar (surface, primary active,
+pill behind the focused icon, label 11px/700). Do not put a bottom
+tab bar on web or desktop.
+
+Login (staff, all clients):
+  Navy rounded header, school name, feature list, white card, pill
+  primary button. Match mobile LoginScreen structure; web/desktop
+  may be a single centred column (max ~420px) instead of a phone
+  width. No parent-register block on web/desktop.
+
+
+U3. Shared components (look-alike, not a rewrite of RN)
+-------------------------------------------------------
+Restyle web/desktop counterparts so they read as the mobile ones.
+Do not invent a fourth card style for accountant screens.
+
+  Surface card     white, radius 22–24px, navy-tinted shadow,
+                   no heavy 1px “admin table” chrome unless it is
+                   a data table.
+  StatCard         icon in soft-accent square (radius 14), big value,
+                   muted label, 4px accent bar at the bottom.
+  PrimaryButton    pill (radius 999), min-height 50, solid primary
+                   navy, white label. Secondary: primarySoft fill,
+                   primary label. Not a bright-blue gradient.
+  SegmentTabs      equal-width pills, primarySoft track, white+navy
+                   active chip.
+  TextField /
+  SelectField      radius 14–16, border --color-border, focus ring
+                   primary, labels 12px muted.
+  Welcome / year   surface card + amber/navy year pill (mobile Home).
+  Toasts / confirms use danger/success/primary from the mobile tokens.
+
+Data tables (Registered, Reports) keep a table on wide screens but
+use the mobile colours (header primarySoft, text --color-text,
+row borders --color-border). On a narrow web window, stacked cards
+matching mobile RegisteredTab are preferred over a squeezed table.
+
+
+U4. What this applies to
+------------------------
+All current staff surfaces, plus every new surface in this file:
+
+  Login, admin shell, accountant shell,
+  Home / dashboard, Students (all tabs), Academics, Attendance,
+  Messages, Settings, More,
+  Fee Home, Management, Payment, Check, Discount, Reports
+  (including Cash and Bank report tabs),
+  Change-password form, student edit modal, payment modal,
+  ID preview chrome (the card artwork itself is unchanged).
+
+Print and PDF (class list, fee list, cash/bank reports, statements,
+ID cards) stay black-on-white. Do not paint navy headers onto a
+school printout.
+
+
+U5. How to verify
+-----------------
+  1. Mobile unchanged in palette (still colors.ts).
+  2. Web browser: header is navy #1E3A8A, buttons navy not #2D5BFF,
+     canvas #F0F1F2, dark toggle works on every staff page.
+  3. Desktop .exe: same as web (it is web-front). Electron must not
+     reintroduce UA button colours that hide labels (see Part F).
+  4. Side-by-side: accountant Discount / Payment / Home on phone vs
+     desktop show the same card radius, navy, amber year pill, and
+     typography weight — not “close enough blue”.
+
+
+========================================================
+PART A — Change password (accountant, and admin for lockstep)
+========================================================
+
+Staff must change their own password from the account menu on every
+client. Accountant is the requester; admin uses the same control so
+the account menu is not forked.
+
+1. API (cloud Postgres AND desktop SQLite, same route)
+------------------------------------------------------
+  PATCH /api/attendance/me/password
+  Auth: requireAttendanceAuth(attendance_admin, attendance_accountant).
+  Parent is 403. Do not add this to the parent app in this spec.
+
+  Body:
+    currentPassword  string, required
+    newPassword      string, required, min 6 characters
+    confirmPassword  string, required, must equal newPassword
+
+  Algorithm:
+    1. Load attendance_users by token sub (id).
+    2. bcrypt.compare(currentPassword, password_hash). Fail 400
+       “Current password is incorrect.”
+    3. Reject if newPassword === currentPassword
+       (“New password must be different.”).
+    4. bcrypt.hash(newPassword, 12). Save password_hash.
+    5. Bump updated_at / row_version so desktop sync pushes the hash.
+    6. Return { ok: true }. Do not return the hash.
+    7. Keep the current JWT. Do not force logout.
+
+  Desktop: the local user row is the source of truth offline. Outbox
+  the users-table mutation. Next online push updates cloud. Password
+  change must work with no internet.
+
+  Do not sync a plaintext password. Only password_hash (already in
+  sync COLUMNS.attendance_users).
+
+
+2. UI (identical copy and fields on all three clients)
+------------------------------------------------------
+Account menu (web/desktop AccountPanel, mobile AppTopBar profile menu),
+directly above Logout:
+
+  Change password
+    Current password
+    New password
+    Confirm new password
+    Save
+
+Show/hide toggles on each field (existing TextField secureToggle).
+Success toast: “Password changed.”
+On success, clear the three fields and close the form (menu can stay).
+
+Accountant More menu on mobile does not replace this. The control lives
+in the account/profile menu so web, desktop, and mobile match.
+
+Parent profile menu: no Change password in this spec.
+
+
+========================================================
+PART B — Payment method: CASH or BANK
+========================================================
+
+The old free-text “Note (optional)” on a payment is replaced by a
+required choice: Cash or Bank. Bank also requires a reference
+number (free text, e.g. 001GC0). Accountant prints Cash and Bank
+reports from the Reports page. The existing class fee list report
+stays. Same on mobile, web, and desktop.
+
+
+3. Persistence
+--------------
+  attendance_fee_payments.channel  TEXT NOT NULL DEFAULT 'cash'
+    values: 'cash' | 'bank'
+
+  attendance_fee_payments.note     TEXT  NULL
+    Bank: the reference number (required, trimmed, kept as typed —
+          letters, digits, e.g. 001GC0).
+    Cash: NULL. Cash has no reference field.
+
+  Postgres:
+    ALTER TABLE attendance_fee_payments
+      ADD COLUMN IF NOT EXISTS channel VARCHAR(8) NOT NULL DEFAULT 'cash';
+    Existing rows → cash (historical unknown).
+    Index (academic_year_id, channel, paid_at).
+
+  SQLite desktop: same column, DEFAULT 'cash'. ensureColumn for
+  already-created local DBs.
+
+  Sync COLUMNS.attendance_fee_payments includes 'channel'.
+  Do not invent a second “tender” table. Do not encode Cash/Bank
+  only inside note — channel is its own column.
+
+  mapPayment:
+    channel: row.channel === 'bank' ? 'bank' : 'cash'
+    note:    row.note || null          // bank reference, else null
+
+  FeePayment on all clients:
+    channel: "cash" | "bank"
+    note: string | null                // reference when bank
+
+
+4. Record / edit payment
+------------------------
+POST /fees/payments — channel is required.
+
+  parse body.channel (case-insensitive) → cash | bank.
+  400 “Select Cash or Bank.” if missing or invalid.
+
+  Bank:
+    reference = trim(body.reference || body.note).
+    400 “Enter the bank reference number.” if empty.
+    Store channel='bank', note=reference.
+
+  Cash:
+    Store channel='cash', note=NULL.
+    Ignore any reference/note sent with cash.
+
+PATCH /fees/payments/:id — amount, channel, and/or reference.
+  Switching to bank requires a reference (new body or existing note).
+  Switching to cash clears note.
+
+Payment modal (FeePaymentTab, all clients). Replace “Note (optional)”
+with:
+
+  Method     [ Cash ]  [ Bank ]     required, no silent default
+  Reference number                   shown and required ONLY if Bank
+                                     placeholder e.g. 001GC0
+                                     free text (not digits-only)
+
+Confirm is blocked until Cash or Bank is selected, and until Bank
+has a non-empty reference.
+
+Payment history (FeeRecordView) and fee statement PDF, each line:
+
+  Amount · Cash|Bank · date/time · Reference (bank) or — (cash)
+
+Edit payment: same Cash/Bank control; Reference field appears for
+Bank. Saving a bank row without a reference is refused.
+
+
+5. Reports page (accountant) — fee list still there
+---------------------------------------------------
+Do not remove the class fee list. Reports gains three segments:
+
+  Tabs:  Fee list  |  Cash  |  Bank
+
+  Fee list tab = today’s class fee list (class picker, refresh, print).
+  Unchanged behaviour and print layout.
+
+  Cash tab / Bank tab (same chrome, different channel):
+    Date from, date to, optional class (empty = all classes)
+    [Load] [Print]
+    Table:
+      Cash: Date/time, Student, Class, Fee type, Amount
+      Bank: Date/time, Student, Class, Fee type, Amount, Reference
+    Footer: N payments · Total {formatMoney(totals.amount)}
+    Empty: “No cash payments in this range.”
+           “No bank payments in this range.”
+
+API (accountant only), all three clients:
+
+  GET /fees/reports/tender/:channel
+    channel = cash | bank
+    query: from, to  YYYY-MM-DD inclusive (Douala calendar)
+           classId   optional
+    Default range: active year start_date … today (Douala).
+
+  Response:
+    channel, from, to, schoolName, academicYearName
+    filters: { classId, className }   // className null if all classes
+    rows: [{
+      paidAt, studentName, barcode, className, feeHeadName,
+      amount, note                  // note = bank reference, else null
+    }]
+    totals: { count, amount }
+
+  Sort paid_at ASC, id ASC. Filter strictly by channel.
+  Never mix cash and bank in one report.
+
+Print: black-on-white landscape A4, same header style as the fee list.
+
+  Title: “CASH PAYMENTS” or “BANK PAYMENTS”
+  Subtitle: school, academic year, date range, class or All classes
+  Columns match the on-screen table (Bank includes Reference)
+  Grand total at the bottom
+
+Mobile: share PDF (same helper pattern as class fee list).
+Web/desktop: iframe print, same as class fee list.
+
+Home dashboard figures are optional. Reports must ship.
+
+
+========================================================
+PART C — Accountant registers students (same as admin)
+========================================================
+
+Accountant can run the full Students module admin already has:
+Registration, Upload, Registered, ID Card.
+
+
+6. Auth
+-------
+Change these routes from requireAdmin() to requireAdminOrAccountant():
+
+  POST   /students
+  PATCH  /students/:id
+  GET    /students/:id
+  POST   /students/bulk-upload
+  POST   /students/bulk-upload-data
+  GET    /students/:id/photo          (already admin-or-accountant)
+
+Keep admin-only:
+
+  DELETE /students/:id
+  DELETE /students                  (delete all)
+  Academic years, classes write, attendance check, SMS settings
+
+Rationale: register and edit (including adding a photo later) are the
+job. Mass-delete stays admin.
+
+GET /students and GET /classes are already admin-or-accountant.
+
+
+7. Navigation (same module, three shells)
+-----------------------------------------
+Web + desktop accountantNav:
+
+  Add route Students between Home and Management.
+  Label: Students
+  Description: Registration & records
+  Icon: people / people-outline
+  Screen: the existing StudentsScreen (same tabs as admin).
+
+Mobile AccountantTabParamList:
+
+  Add Students tab (same StudentsScreen).
+  Place it after Home, before Management.
+  Same icons as admin Students tab.
+
+Do not give accountant Academics, Attendance, guardian SMS Settings,
+or attendance Reports. Those stay admin.
+
+Accountant can open Registered to edit a student (photo later).
+ID Card tab: cards without a photo still render with the placeholder
+silhouette already used when photoUrl is null.
+
+
+========================================================
+PART D — Photo is optional
+========================================================
+
+Registration succeeds with no picture. Picture is added later via
+edit. Same rule on API and every client, including bulk upload
+(already optional) and desktop.
+
+
+8. API
+------
+validateStudentRegistration default: requirePhoto = false.
+Remove the “ID card photo is required” branch for create and update.
+
+POST /students:
+  If photoDataUrl is empty/missing, photo_url = NULL.
+  Do not call saveBase64Image on an empty payload.
+  If photoDataUrl is present, keep size validation
+  (validateStudentPhotoDataUrl).
+
+PATCH /students/:id:
+  No photo in body → leave existing photo_url (including NULL).
+  photoDataUrl present → replace as today.
+  Never require a photo to save name/class/contact changes.
+
+GET list/detail already allow photoUrl: null. Keep that.
+
+
+9. Clients (web, mobile, desktop — one form contract)
+-----------------------------------------------------
+RegistrationTab validateRegistration:
+  Drop `if (!photoDataUrl) return "ID card photo is required."`
+  Required remain: full name, sex, DOB, place of birth, guardian,
+  contact, class.
+
+Label: “ID card photo (optional)” not “ID card photo *”.
+Helper: “You can add the photo later from Registered → Edit.”
+
+RegisteredTab / StudentEditModal:
+  Save allowed when the student still has no photo.
+  Drop validateForm’s photoOk required check.
+  Edit remains the way to add or replace a picture.
+
+Placeholder: StudentAvatar / ID preview already handles missing
+photoUrl. Keep a silhouette; do not block print. ID PDF uses the
+placeholder when photoToDataUrl gets nothing.
+
+Bulk upload: keep requirePhoto: false.
+
+
+========================================================
+PART E — Desktop sync: absence_days.student_id NOT NULL
+========================================================
+
+Error still seen on pull/snapshot:
+
+  NOT NULL constraint failed: attendance_absence_days.student_id
+
+Same class of bug can hit attendance_records,
+attendance_student_day_scans, attendance_fee_payments,
+attendance_fee_discounts when a child row arrives before (or without)
+its student.
+
+
+10. Cause
+---------
+toWirePayload replaces numeric FKs with UUIDs. If the student is gone
+or not yet in local SQLite, student_uuid is null/unresolved.
+
+fromWirePayload (sync/identity.js) then:
+
+  • uuid missing  → sets student_id = null
+  • uuid present but lookupIdByUuid returns null
+      → may skip missing_fk when a leftover numeric id exists, then
+        overwrites student_id with null anyway
+
+applyMutation INSERTs that row. SQLite NOT NULL fires. engine.js
+re-throws (only unique errors are skipped), and the whole pull fails.
+
+
+11. Fix (shared apply path — desktop pull AND cloud push)
+---------------------------------------------------------
+fromWirePayload, for every required FK (student_id, academic_year_id,
+and other NOT NULL FKs in TABLE_FKS):
+
+  1. Resolve uuid → local id.
+  2. If unresolved, throw { code: 'missing_fk', fk, uuid }.
+     Never write null into a NOT NULL column.
+  3. Never copy a foreign numeric id from the wire (cloud id ≠ local id).
+  4. Optional FKs only (discount class_id XOR student_id) may stay null
+     when that side is unused.
+
+applyMutation / engine applySnapshot / pullChanges / cloud push:
+
+  On missing_fk:
+    Skip this row. Do not abort the batch.
+    Desktop: leave last_pull_cursor unmoved only if you must retry
+    the same change; preferred: skip orphan, advance cursor, log
+    [sync] skip table uuid missing_fk:student_uuid
+  On SQLITE_CONSTRAINT_NOTNULL / 23502:
+    Treat like missing_fk: skip, log, continue. Never surface this
+    as a fatal sync error to the UI.
+
+Orphans (absence_days whose student was deleted): skip forever.
+Cloud snapshot builder: omit child rows whose parent uuid lookup
+returns null, so they are not sent.
+
+Order already has attendance_students before attendance_absence_days.
+Keep UPSERT_ORDER. After applying a chunk, one retry pass for rows
+skipped with missing_fk in that chunk (student may have landed
+earlier in the same snapshot). If still unresolved, skip.
+
+Do not ALTER absence_days.student_id to nullable.
+
+
+12. UI
+------
+SyncStatus / DesktopStartupSync: a skipped orphan is not an error
+banner. Only real failures (network, auth, unique corruption) show.
+Log skipped counts in the desktop log, not a modal.
+
+
+========================================================
+PART F — Desktop discount student search: names must show
+========================================================
+
+Symptom: Discount → search student. Matches return (search “works”)
+but the student name is blank on desktop. Mobile and web show the name.
+
+Desktop uses web-front FeeDiscountScreen against local SQLite. Fix
+the shared layers so all three clients render the same card.
+
+
+13. Search API (routes.js GET /fees/students/search)
+----------------------------------------------------
+SQL must run on Postgres and SQLite:
+
+  dialect.convertPgToSqlite: rewrite ILIKE to
+    LIKE … COLLATE NOCASE
+  (SQLite has no ILIKE; without this, behaviour is not the same.)
+
+  SELECT aliases stay snake_case. Mapper is defensive:
+
+    fullName:  r.full_name  ?? r.fullName  ?? ''
+    className: r.class_name ?? r.className ?? null
+    classId:   r.class_id   ?? r.classId   ?? null
+    barcode:   r.barcode
+    id:        r.id
+
+  Never return a hit with an empty fullName if the DB has a name.
+  If both casings are missing, skip the row (do not push a blank card).
+
+Same mapper for any other student-summary endpoint the discount or
+payment pickers use.
+
+
+14. Discount UI (FeeDiscountScreen web/desktop + FeeDiscountTab mobile)
+----------------------------------------------------------------------
+Result row always shows:
+
+  Line 1: student full name (font-weight bold, theme text colour)
+  Line 2: class · barcode
+
+Web/desktop CSS (fee-discount.css), Electron-safe:
+
+  .fee-discount__result {
+    color: var(--color-text);          /* beat UA ButtonText */
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--color-surface-muted);
+  }
+  .fee-discount__result-name {
+    color: var(--color-text);
+    opacity: 1;
+    visibility: visible;
+  }
+
+Do not rely on inherit from <button> in Electron.
+
+Render: {s.fullName || "Student"} so a mapping miss is still visible
+while §13 is verified.
+
+Payment class-student filter uses s.fullName.toLowerCase() — guard:
+
+  (s.fullName || "").toLowerCase().includes(q)
+
+so a missing name cannot crash desktop.
+
+Verify on desktop by typing two letters: each row shows the real
+name, class, and barcode, identical to web.
+
+
+========================================================
+PART G — Lockstep matrix (what ships together)
+========================================================
+
+                    Cloud API   Web   Mobile   Desktop
+Mobile UI scheme        —        ✓       ✓        ✓
+Light / dark toggle     —        ✓       ✓        ✓
+Change password         ✓        ✓       ✓        ✓
+Cash/Bank on payment    ✓        ✓       ✓        ✓
+Cash report + print     ✓        ✓       ✓        ✓
+Bank report + print     ✓        ✓       ✓        ✓
+Accountant Students     ✓        ✓       ✓        ✓
+Photo optional          ✓        ✓       ✓        ✓
+Absence FK skip         ✓        —       —        ✓
+Discount name visible   ✓        ✓       ✓        ✓
+Parent app              —        —       ✓        —
+
+“—” = not applicable. Desktop Students/Fees are the web UI plus
+local API; implementing web-front + mobile-back covers desktop once
+the SQLite dialect and sync skips are in.
+
+
+15. Refusals
+------------
+  - Accountant-only password change on mobile but not web, or vice versa.
+  - Storing cash/bank only in the note field (channel is its own column).
+  - Recording a bank payment without a reference number.
+  - Removing the class fee list from Reports.
+  - A combined cash+bank print as a substitute for separate reports.
+  - Requiring a photo after this ships.
+  - Aborting a whole desktop pull because one absence_days row has
+    no student.
+  - Making student_id nullable to “fix” sync.
+  - A desktop-only discount picker that lists barcodes without names.
+  - Parent screens on web or desktop.
+  - Keeping web/desktop on #2D5BFF (or any palette other than
+    mobile colors.ts) “until a later polish pass”.
+  - Dark mode on mobile only.
+  - A bottom tab bar on web/desktop, or a sidebar on the phone, just
+    to force identical layout. Scheme is visual; layout follows
+    the device.
+  - Painting navy onto print/PDF school documents.
+
+
+16. Implementation order
+------------------------
+  0. UI scheme: retoken web-front colors.css from mobile colors.ts;
+     light/dark + ThemeToggle on web/desktop; navy AppTopBar-equivalent
+     header; restyle cards, buttons, fields, segment tabs, login,
+     admin + accountant shells. Desktop follows web-front. Do this
+     before new accountant screens so Cash/Bank and Students are not
+     built in the old bright-blue look.
+  1. Photo optional: helper default, POST skip empty photo, three
+     registration UIs, edit UIs. (Unblocks accountant registration.)
+  2. requireAdminOrAccountant on student write/read-one/bulk.
+     Accountant nav + mobile tab → existing StudentsScreen.
+  3. PATCH /me/password + account-menu form on web/desktop and mobile.
+  4. payments.channel column (Postgres + SQLite), mapPayment, POST/PATCH,
+     payment modal Cash/Bank, history + statement PDF.
+  5. GET /fees/reports/tender/:channel + Cash/Bank report tabs + print.
+  6. dialect ILIKE → LIKE COLLATE NOCASE; search mapper fallbacks;
+     Electron button colour; discount result always prints fullName.
+  7. fromWirePayload never nulls NOT NULL FKs; skip missing_fk and
+     NOTNULL in apply/pull/push; omit orphan children from snapshot.
+
+Do not ship accountant Students while photo is still mandatory.
+Do not ship Cash/Bank reports before every new payment stores channel.
+Do not call the desktop discount bug fixed until a name is visible
+in the packaged Electron app, not only in the browser.
+Do not ship a new staff screen that still uses the old web blue.

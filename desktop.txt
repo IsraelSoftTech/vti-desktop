@@ -1,0 +1,983 @@
+================================================================================
+  DESKTOP APP — OFFLINE-FIRST IMPLEMENTATION ALGORITHM
+  Smart Attendance (MPASAT) · Electron + local Express + SQLite + cloud sync
+  Version 1.0 · Engineering spec (do not implement ad-hoc; follow this order)
+================================================================================
+
+This document is the conversion plan for the already-working WEB app
+(web-front + mobile-back /api/attendance) into a standalone Windows desktop
+app (.exe installer, app icon) that:
+
+  • Runs 100% offline against a local SQLite database.
+  • When the PC has internet, pushes local changes to the online PostgreSQL
+    database (the same DB the live web app uses).
+  • Pulls changes made on the live web (and other desktops) back into SQLite.
+  • Keeps attendance, fees, photos, and uniqueness rules consistent.
+
+Sync is financial- and attendance-critical. Implement the identity model,
+outbox, and conflict rules BEFORE any UI polish.
+
+
+--------------------------------------------------------------------------------
+1. WHAT EXISTS TODAY (STUDY FINDINGS)
+--------------------------------------------------------------------------------
+
+1.1 Web frontend  (web-front)
+
+  React 19 + Vite SPA. Two signed-in shells:
+
+    Admin (role attendance_admin)
+      Home dashboard, Students (register / registered / ID cards / Excel
+      upload), Academics (years / classes / school times), Attendance
+      (barcode check-in/out + records), Reports, Settings (SMS windows,
+      school logo/name).
+
+    Accountant (role attendance_accountant)
+      Fee home, fee types, class fee setup, payment (barcode), check/
+      statement, discounts, class fee reports.
+
+  All screens talk to the backend through web-front/src/api/client.ts
+  → GET/POST/PATCH/DELETE  {API}/api/attendance/...
+  Auth: JWT in localStorage (attendance_token) + cookie. Login is
+  username + bcrypt password against attendance_users.
+
+  Client-side already (works offline once data is local):
+    jspdf ID cards / class reports / fee records, html5-qrcode camera
+    scan, Excel is uploaded as bytes to the API.
+
+  Client-side that BREAKS offline today:
+    Google Fonts CDN (Poppins) in index.html.
+    Photos loaded from FTP public URLs (or proxied GET /students/:id/photo
+    which itself fetches FTP).
+    Every mutation requires the live Express + PostgreSQL server.
+
+  In-memory cache (utils/cache.ts) is a UX cache only. It is NOT an
+  offline store. Do not extend it into a database.
+
+1.2 Backend  (mobile-back)
+
+  Express on PORT 4000. PostgreSQL via pg Pool (db.js).
+  Attendance module: /api/attendance  (THIS is the desktop product).
+  Public school CMS: /api/web         (OUT OF SCOPE for desktop).
+
+  Tables that MUST exist locally (from initDb.js):
+
+    attendance_users
+    attendance_academic_years
+    attendance_classes              (unique name + academic_year_id;
+                                     optional per-class start/end time)
+    attendance_students             (unique barcode ATT-{yearId}-{hex};
+                                     photo_url; unused face_descriptor)
+    attendance_records              (check_in | check_out, barcode | face)
+    attendance_student_day_scans    PK (student_id, year_id, date)
+                                    checked_in_at / checked_out_at /
+                                    missed_checkout_sms_sent_at
+    attendance_absence_days         PK (student_id, year_id, date)
+    attendance_settings             PK academic_year_id
+                                    school name/logo, times, SMS flags,
+                                    scan windows
+    attendance_fee_heads            unique (name, year); soft trash
+    attendance_class_fees           unique (class_id, fee_head_id)
+    attendance_fee_payments
+    attendance_fee_discounts        one student OR one class per year
+
+  Business rules the desktop MUST preserve (routes.js):
+
+    • One active academic year.
+    • Check-in/out only inside school-time windows (schoolTimes.js +
+      settings). Class times override year settings.
+    • One check-in per student per day; checkout requires prior check-in;
+      one checkout per day. Duplicate scan within 15 seconds is ignored
+      (no second SMS).
+    • Check-in deletes that day's absence row.
+    • Guardian SMS (Twilio) is fire-and-forget after a successful check.
+    • Absent scheduler (absentScheduler.js) ticks every 2 minutes on the
+      SERVER: marks absence + optional SMS; missed-checkout SMS.
+    • Photos uploaded to FTP (storage.js), not the DB.
+    • Bootstrap users seeded: admin1234 / accountant@!  (env-overridable).
+    • JWT typ=attendance, roles attendance_admin | attendance_accountant.
+
+  Postgres-only SQL used throughout (must be adapted for SQLite):
+    $1 placeholders, SERIAL, TIMESTAMPTZ, BOOLEAN, JSONB, NUMERIC,
+    NOW(), INTERVAL '15 seconds', ::int casts, ON CONFLICT, RETURNING *.
+
+
+--------------------------------------------------------------------------------
+2. PRODUCT SCOPE
+--------------------------------------------------------------------------------
+
+IN SCOPE
+  • Admin + Accountant web UI, pixel-identical, packaged as a Windows app.
+  • Local SQLite with the same attendance/fee behaviour as the live API.
+  • Bidirectional sync with the existing online PostgreSQL.
+  • Local photos, ID cards, PDFs, barcode camera, Excel bulk upload.
+  • App icon + NSIS .exe installer (click → install on any Windows PC).
+  • Status of sync (idle / syncing / offline / error) in the top bar.
+
+OUT OF SCOPE (do not drag into the desktop binary)
+  • Public school website CMS (/api/web, web_* tables).
+  • Staff attendance (staff.txt) — not built yet.
+  • Putting Twilio / FTP / DATABASE_URL secrets into every school PC.
+    Cloud remains the only place those live.
+  • Rewriting React screens or inventing a second API for the UI.
+
+NON-GOAL
+  • Making the live web itself work offline. Web stays online-only.
+    Desktop is the offline node.
+
+
+--------------------------------------------------------------------------------
+3. TARGET ARCHITECTURE
+--------------------------------------------------------------------------------
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  Windows PC                                                 │
+  │  ┌───────────────────────────────────────────────────────┐  │
+  │  │ Electron main process                                 │  │
+  │  │  • window + app icon                                  │  │
+  │  │  • spawn local API on 127.0.0.1:<port>                │  │
+  │  │  • network watcher → kick sync                        │  │
+  │  └──────────────┬────────────────────────┬───────────────┘  │
+  │                 │                        │                  │
+  │  ┌──────────────▼──────────┐  ┌──────────▼───────────────┐  │
+  │  │ Renderer                │  │ Local Express            │  │
+  │  │ web-front production    │  │ SAME routes.js logic     │  │
+  │  │ loads http://127.0.0.1  │  │ db adapter → SQLite      │  │
+  │  │ (same origin as API)    │  │ local disk photos        │  │
+  │  │ NO code change to API   │  │ outbox on every mutate   │  │
+  │  │ paths                   │  │ sync engine (push/pull)  │  │
+  │  └─────────────────────────┘  └──────────┬───────────────┘  │
+  │                                          │                  │
+  │                     %APPDATA%\MPASAT-Attendance\            │
+  │                       data.sqlite  media\  logs\            │
+  └──────────────────────────────────────────┼──────────────────┘
+                                             │  only when online
+                                             ▼
+                              Cloud mobile-back (unchanged product API)
+                              NEW /api/sync/*  + uuid columns
+                              PostgreSQL + FTP + Twilio
+
+
+Why this shape
+  The UI already speaks REST. Keep that contract. The desktop is a local
+  server with a different database driver plus a sync worker. Do not put
+  SQLite in the renderer. Do not talk to cloud Postgres from the UI.
+
+Process model
+  1. Electron starts.
+  2. Main picks a free port (prefer 127.0.0.1:47821; fall back if busy).
+  3. Main starts the bundled Node Express (same process or utilityProcess).
+  4. Express opens SQLite, runs migrations, seeds bootstrap users if empty.
+  5. Main opens BrowserWindow → http://127.0.0.1:<port>/  (static UI).
+  6. UI uses relative /api/attendance (apiBaseUrl = "") so it never needs
+     VITE_API_URL and never leaves the machine.
+  7. Sync worker runs inside Express, not in the renderer.
+
+
+--------------------------------------------------------------------------------
+4. NEW REPO LAYOUT
+--------------------------------------------------------------------------------
+
+  desktop/                         NEW Electron shell
+    package.json                   electron, electron-builder, better-sqlite3
+    electron/main.js               window, icon, spawn API, single-instance
+    electron/preload.js            empty or tiny (sync status via HTTP)
+    build/icon.ico                 Windows icon (256/128/64/32/16)
+    build/icon.png                 512² source
+    installer/                     NSIS extras if needed
+
+  mobile-back/                     SHARED with cloud (do not fork forever)
+    db.js                          KEEP postgres pool for cloud
+    dbSqlite.js                    NEW sqlite adapter (desktop only)
+    dialect.js                     NEW SQL rewrite helpers
+    initSqlite.js                  NEW sqlite schema = initDb tables
+    storageLocal.js                NEW disk photos for desktop
+    sync/                          NEW (used by desktop + cloud)
+      identity.js                  uuid helpers, id map
+      outbox.js                    enqueue / drain
+      engine.js                    push then pull loop
+      conflict.js                  per-table merge
+      media.js                     photo upload/download
+      clock.js                     hybrid logical clock
+    routes.js                      UNCHANGED public API (uses db facade)
+    server.js                      cloud entry
+    serverDesktop.js               NEW desktop entry (sqlite + static UI)
+
+  web-front/                       mostly unchanged
+    index.html                     bundle Poppins locally (offline fonts)
+    src/components/SyncStatus.tsx  NEW small indicator
+    vite.config.ts                 base: './' when building for desktop
+
+Rule: one routes.js. The db facade returns { rows } like pg. Cloud uses
+Pool; desktop uses better-sqlite3. If a query is Postgres-only, put the
+difference in dialect.js — never duplicate a route.
+
+
+--------------------------------------------------------------------------------
+5. SQLITE SCHEMA ALGORITHM
+--------------------------------------------------------------------------------
+
+5.1 Type mapping (Postgres → SQLite)
+
+  SERIAL PRIMARY KEY          → INTEGER PRIMARY KEY AUTOINCREMENT
+  VARCHAR(n)                  → TEXT
+  TEXT                        → TEXT
+  BOOLEAN                     → INTEGER 0/1  (adapter coerces)
+  DATE / TIME / TIMESTAMPTZ   → TEXT ISO-8601
+                                  date  = YYYY-MM-DD
+                                  time  = HH:MM
+                                  ts    = YYYY-MM-DDTHH:MM:SS.sssZ
+  NUMERIC(12,2)               → TEXT of decimal (avoid REAL money drift)
+                                  feeHelpers.roundMoney still applies
+  JSONB                       → TEXT JSON (face_descriptor unused)
+
+  Keep the same CHECK constraints, UNIQUE, and FKs with ON DELETE
+  CASCADE / SET NULL / RESTRICT as initDb.js.
+
+5.2 Columns added on BOTH Postgres and SQLite (sync identity)
+
+  Every syncable table gets:
+
+    uuid            TEXT NOT NULL UNIQUE
+                    generated in app code (crypto.randomUUID) on INSERT
+                    never reuse; tombstones keep the uuid
+    updated_at      TEXT/TIMESTAMPTZ NOT NULL
+    deleted_at      TEXT/TIMESTAMPTZ NULL     (soft-delete for sync)
+    row_version     INTEGER NOT NULL DEFAULT 1
+    origin_device   TEXT NULL                 (device_id that last wrote)
+
+  Tables: users, academic_years, classes, students, records, day_scans,
+  absence_days, settings, fee_heads, class_fees, fee_payments,
+  fee_discounts.
+
+  Composite-PK tables (day_scans, absence_days, settings) still keep
+  their natural PK. uuid is extra unique identity for the sync payload.
+
+  Postgres migration (cloud, run once before any desktop ships):
+
+    ALTER TABLE ... ADD COLUMN IF NOT EXISTS uuid UUID;
+    backfill uuid = gen_random_uuid() WHERE uuid IS NULL;
+    ALTER TABLE ... ALTER COLUMN uuid SET NOT NULL;
+    CREATE UNIQUE INDEX ... ON table(uuid);
+    plus updated_at / deleted_at / row_version / origin_device.
+
+  Existing hard DELETEs in routes.js stay as they are for the HTTP API
+  (the UI still "deletes"). The db facade intercepts DELETE and:
+    1. copies uuid into sync_tombstones
+    2. writes sync_outbox op=delete
+    3. then actually DELETEs the sqlite row (or sets deleted_at)
+  Cloud sync apply uses deleted_at / tombstone so other nodes remove it.
+
+5.3 Desktop-only tables (not synced as business data)
+
+  sync_meta
+    key TEXT PRIMARY KEY
+    value TEXT
+    keys: device_id, cloud_base_url, last_pull_cursor, last_push_at,
+          bootstrap_done, schema_version, last_sync_error
+
+  sync_id_map
+    table_name TEXT NOT NULL
+    uuid       TEXT NOT NULL
+    local_id   INTEGER NOT NULL
+    server_id  INTEGER
+    PRIMARY KEY (table_name, uuid)
+    UNIQUE (table_name, local_id)
+
+    The UI and routes.js ALWAYS use local_id (integer), same as today.
+    Sync talks in uuid. After a successful push of a new row, store
+    server_id. Never rewrite local_id after the UI has seen it.
+
+  sync_outbox
+    id INTEGER PK
+    op TEXT CHECK (op IN ('upsert','delete'))
+    table_name TEXT
+    uuid TEXT
+    payload_json TEXT        -- full row in canonical JSON (snake_case)
+    media_paths_json TEXT    -- local files that must upload first
+    row_version INTEGER
+    occurred_at TEXT
+    attempts INTEGER DEFAULT 0
+    last_error TEXT
+    UNIQUE(table_name, uuid, op) replaced by: keep latest row per uuid
+    (on enqueue, delete older pending rows for same uuid)
+
+  sync_tombstones
+    table_name, uuid, deleted_at, origin_device
+
+  pending_notify
+    kind TEXT  -- check_in | check_out | absence | missed_checkout
+    student_uuid TEXT
+    record_uuid TEXT NULL
+    attendance_date TEXT
+    created_at TEXT
+    delivered_at TEXT NULL
+    Cloud is the SMS sender. Desktop only queues facts. See §11.
+
+
+--------------------------------------------------------------------------------
+6. DB ADAPTER ALGORITHM (desktop)
+--------------------------------------------------------------------------------
+
+Implement db.query(sql, params) → { rows } matching pg.
+
+  1. Rewrite $1 $2 … to ?  (sqlite).
+  2. Rewrite NOW() → datetime('now').
+  3. Rewrite INTERVAL '15 seconds' comparisons to
+       datetime(recorded_at) > datetime('now', '-15 seconds')
+     isolate this in the check route with a helper, do not regex blindly.
+  4. Strip ::int / ::varchar casts.
+  5. BOOLEAN: bind 1/0; when reading, expose true/false for mapped fields
+     that the UI already expects as booleans (or keep 1/0 and coerce in
+     map* helpers — pick one and test login + settings toggles).
+  6. RETURNING * is supported on SQLite 3.35+. Electron's better-sqlite3
+     ships a new enough amalgamation. Use it.
+  7. Wrap mutations that must be atomic (check-in + day_scans + absence
+     delete + outbox) in better-sqlite3 transaction().
+  8. Foreign keys: PRAGMA foreign_keys = ON on every connection.
+  9. WAL mode: PRAGMA journal_mode = WAL; busy_timeout = 5000.
+
+initSqlite.js mirrors initAttendanceTables() with SQLite DDL + the extra
+sync columns. Seed bootstrap admin/accountant ONLY if attendance_users
+is empty. After first successful snapshot pull, do not re-seed (would
+conflict with cloud users).
+
+
+--------------------------------------------------------------------------------
+7. LOCAL MEDIA ALGORITHM
+--------------------------------------------------------------------------------
+
+Cloud stores photos on FTP; DB holds a public URL.
+Desktop stores files on disk; DB holds a local relative path.
+
+  Directory:  %APPDATA%\MPASAT-Attendance\media\
+    students\{uuid}.jpg
+    logos\{year-uuid}.png
+
+  storageLocal.saveImageBuffer(buffer, ext, prefix, uuid)
+    → writes media\...\{uuid}.{ext}
+    → returns "local://students/{uuid}.jpg"   (never a file:// URL in DB)
+
+  GET /api/attendance/students/:id/photo
+    if photo_url starts with local://  → stream the file
+    else if http(s) and file already cached → stream cache
+    else if online → fetch, cache to media\remote\{hash}, stream
+    else → 404 with existing error shape
+
+  School logo: same pattern. UI already uses branding endpoints.
+
+  NEVER put FTP credentials in the desktop app. Photo bytes travel
+  through /api/sync/media (authenticated) which the cloud writes to FTP.
+
+
+--------------------------------------------------------------------------------
+8. IDENTITY AND ID MAPPING (THE CRITICAL RULE)
+--------------------------------------------------------------------------------
+
+Integer IDs will DIVERGE: desktop student id 41 is not cloud student 41.
+
+  Canonical identity = uuid (created at insert time, both sides).
+  Local integer id   = what routes.js and the React UI use.
+  Server integer id  = what PostgreSQL SERIAL assigned.
+
+Algorithm for every INSERT in desktop routes:
+
+  uuid = randomUUID()
+  INSERT row with uuid, updated_at=now, row_version=1, origin_device
+  local_id = lastInsertRowid
+  upsert sync_id_map(table, uuid, local_id, server_id=NULL)
+  enqueue outbox upsert
+
+Algorithm for FK fields in outbox payload:
+
+  Do not send local integer FKs to the cloud.
+  Send uuid FKs:
+
+    student_uuid, class_uuid, academic_year_uuid, fee_head_uuid, ...
+
+  Cloud maps those uuids to its integer PKs before INSERT/UPDATE.
+
+Algorithm when applying a cloud row locally:
+
+  lookup sync_id_map by uuid
+  if found → UPDATE the local integer row in place (local_id unchanged)
+  if not found → INSERT, take new local_id, store map with server_id
+  rewrite FK integers using map: cloud student_id 1200 → local 41
+    by joining cloud payload student_uuid → local_id
+
+Barcode uniqueness: barcode stays globally unique (ATT-{year}-{hex}).
+Year id inside the barcode string is the LOCAL year id today. That is
+a problem across devices.
+
+  CHANGE (both web and desktop, before desktop ships):
+    generateBarcode() must NOT embed integer year id.
+    New format:  ATT-{8 hex}  or  ATT-{year.uuid short}-{8 hex}
+    Keep accepting old ATT-{int}-{hex} barcodes forever (lookup by
+    exact barcode string, never parse the year out of it).
+
+  findStudentByBarcode already matches barcode + academic_year_id.
+  Sync of students carries barcode as an opaque unique key. If two
+  offline devices mint the same barcode (astronomically rare with 4
+  random bytes × two devices): cloud rejects, desktop regenerates and
+  retries that outbox row.
+
+
+--------------------------------------------------------------------------------
+9. CHANGE CAPTURE (OUTBOX)
+--------------------------------------------------------------------------------
+
+Do not poll sqlite for diffs. Every successful mutation in routes.js
+goes through a wrapper:
+
+  await mutate(table, uuid, op, rowSnapshot, mediaPaths)
+
+which:
+  1. commits the business transaction
+  2. deletes any pending outbox rows for that uuid
+  3. inserts one new outbox row (latest wins)
+
+Cover: POST/PATCH/DELETE students, classes, years (incl. activate),
+records (create + delete + clear), settings, fees (heads, class fees,
+payments, discounts), users (if ever editable), absence/day_scans
+written by check and by the local scheduler.
+
+Reads never touch the outbox.
+
+Idempotency: outbox uuid + row_version is the idempotency key the cloud
+uses. Re-push is safe.
+
+
+--------------------------------------------------------------------------------
+10. CLOUD SYNC API (add to mobile-back, used only by desktop)
+--------------------------------------------------------------------------------
+
+Authenticate with a device token, not the staff JWT.
+
+  POST /api/sync/register
+    body: { deviceId, deviceName, appVersion }
+    header: SYNC_PROVISIONING_SECRET (baked at build as a hash check,
+            or entered once in a first-run "Connect to school server"
+            screen as a pairing code the school admin generates on web)
+    returns: { deviceToken, serverTime }
+
+  Store deviceToken in sync_meta. All later sync calls:
+    Authorization: Bearer <deviceToken>
+    typ=sync_device  (distinct from attendance JWT)
+
+  GET /api/sync/snapshot
+    Full dump of all non-deleted attendance_* rows as
+    { table, uuid, server_id, row, row_version, updated_at }[]
+    plus media manifest { uuid, kind, sha256, downloadPath }.
+    Used on first launch (empty sqlite) and disaster recovery.
+    Stream/paginated by table to avoid 50mb JSON.
+
+  POST /api/sync/push
+    body: {
+      deviceId,
+      mutations: [{ op, table, uuid, row_version, occurred_at, payload }],
+    }
+    Cloud applies in FK order (see §12).
+    Returns: {
+      accepted: [{ uuid, server_id, row_version }],
+      rejected: [{ uuid, code, message, serverRow? }],
+      notify:   [{ kind, uuid }]   // SMS the cloud will send
+    }
+
+  GET /api/sync/pull?cursor=<opaque>
+    Changes since cursor (updated_at, id) for all tables, including
+    tombstones (deleted_at set). Cursor is a server monotonic id from
+    a new table sync_change_log, NOT "updated_at only" (clocks skew).
+
+  Cloud write path (every existing routes.js mutation, when running
+  in cloud mode) MUST append to sync_change_log:
+    id BIGSERIAL, table_name, uuid, op, row_version, at TIMESTAMPTZ
+  This is how the live WEB's changes reach the desktop.
+
+  POST /api/sync/media
+    multipart: uuid, kind=student_photo|school_logo, file
+    Cloud saves via existing storage.uploadBuffer and returns public URL.
+    Cloud updates photo_url on the row if it still points at this uuid.
+
+  GET /api/sync/media/:uuid
+    Cloud fetches FTP (or redirects) so desktop can cache bytes.
+    Desktop never speaks FTP.
+
+
+--------------------------------------------------------------------------------
+11. SMS AND THE ABSENT SCHEDULER
+--------------------------------------------------------------------------------
+
+Twilio keys stay on the cloud server. Desktop never sends SMS itself.
+
+Desktop still MUST mark absences locally (reports must be correct
+offline). Run a copy of absentScheduler against SQLite, but:
+
+  • Insert absence_days as today.
+  • Enqueue pending_notify (kind=absence) instead of sendTwilioSms.
+  • Do not set sms_sent_at locally (leave NULL).
+
+On successful push of:
+  attendance_records (new check_in / check_out)
+  attendance_absence_days (new, sms_sent_at IS NULL)
+  day_scans missed-checkout candidates
+
+the CLOUD:
+  1. Applies the row.
+  2. If guardian SMS is enabled and not yet sent (sms_sent_at /
+     a new guardian_notified_at on records):
+       call existing notifyGuardianOnCheck / absence SMS.
+  3. Sets sms_sent_at / notified flag.
+  4. Those flag updates appear on the next pull so desktop does not
+     re-queue.
+
+Dedup (critical):
+  Same student, same date, same kind → at most one SMS.
+  Cloud unique: (student_id, academic_year_id, attendance_date, kind)
+  in a notify_log table. Duplicate check from web + desktop = one SMS.
+  15-second duplicate scan rule remains local; it never enqueues notify.
+
+WhatsApp flag exists but is unused — keep storing it, do not build a
+second channel in v1.
+
+If the PC is offline all day: SMS go out when the first successful
+push happens (possibly evening). That is acceptable and must be
+documented to the school. Do not try to send from the PC.
+
+
+--------------------------------------------------------------------------------
+12. SYNC ENGINE LOOP (desktop)
+--------------------------------------------------------------------------------
+
+Triggers (any one starts a run; coalesce to one in-flight loop):
+
+  • App start, after sqlite open
+  • OS network online event
+  • Every 30 seconds while online (backoff to 2 min after 3 failures)
+  • After any mutate (debounced 2 seconds) if online
+  • Manual "Sync now" in the top bar
+
+Single-flight: if a run is active, set a dirty flag and run once more
+when it finishes.
+
+ALGORITHM  syncOnce():
+
+  IF no deviceToken: try register (needs pairing). If fail, stop
+     (app still works offline).
+  IF no network: set status=offline; stop.
+
+  status = syncing
+
+  // --- A. Upload media first (payloads need public URLs on cloud)
+  FOR each outbox row with media_paths:
+    POST /api/sync/media
+    on success: strip media_paths from outbox (bytes are on cloud)
+    on fail: keep row, abort this uuid (do not push JSON without photo)
+
+  // --- B. PUSH in FK order
+  order = [
+    attendance_academic_years,
+    attendance_users,            // rarely changes
+    attendance_classes,
+    attendance_settings,
+    attendance_students,
+    attendance_fee_heads,
+    attendance_class_fees,
+    attendance_fee_discounts,
+    attendance_fee_payments,
+    attendance_records,
+    attendance_student_day_scans,
+    attendance_absence_days,
+  ]
+  deletes are sent AFTER child upserts? No:
+    deletes of parents must wait until child deletes are pushed.
+    So: push child deletes first (records, payments, …) then parent
+    deletes; push parent upserts first then child upserts.
+
+    Pass 1: upserts in `order`
+    Pass 2: deletes in reverse `order`
+
+  Batch ≤ 200 mutations per HTTP call.
+  For each accepted uuid: delete outbox row; store server_id in map.
+  For each rejected:
+    code=conflict → run §13 locally using serverRow, then re-enqueue
+      the merged row (or drop if server won and local is identical).
+    code=missing_fk → wait (parent not on server yet); retry next loop.
+    code=duplicate_barcode → regenerate barcode locally, PATCH student,
+      re-enqueue.
+    other → attempts++, last_error; after 8 attempts surface in UI.
+
+  // --- C. PULL
+  cursor = sync_meta.last_pull_cursor
+  LOOP pages of GET /api/sync/pull?cursor=
+    FOR each change:
+      applyRemoteChange(change)   // §13
+    save new cursor AFTER the whole page commits (one sqlite tx)
+
+  // --- D. MEDIA DOWNLOAD
+  FOR students/settings whose photo_url is http(s) and local cache miss:
+    GET /api/sync/media/:uuid → write media\... ; set photo_url local://
+    (keep a column photo_remote_url if useful; UI only needs local)
+
+  status = idle
+  last_push_at = now
+
+Crash safety: each page is a sqlite transaction. Cursor advances only
+on commit. Outbox deleted only after HTTP 200 accepted[]. Re-push of
+already-applied uuid is a no-op on cloud (same row_version).
+
+
+--------------------------------------------------------------------------------
+13. CONFLICT RULES (per table)
+--------------------------------------------------------------------------------
+
+Clock: each node has a hybrid logical clock (HLC) stored in sync_meta.
+Every write sets updated_at = HLC.now(). Compare (hlc, device_id) for
+total order. Do not trust the PC wall clock alone.
+
+Default for mutable rows (students, classes, years, settings, fee heads,
+class fees, discounts, users):
+
+  LAST-WRITE-WINS on the whole row, by (row_version, updated_at, device_id).
+  If incoming.row_version < local.row_version AND local has pending outbox:
+    keep local, push local (server will accept if we increment correctly).
+  If incoming.row_version > local: apply incoming, DROP pending outbox
+    for that uuid (server is newer; local un-pushed edit lost — this is
+    why debounce+frequent sync matters).
+  If equal version but different payload: LWW by updated_at then device_id.
+
+NEVER LWW these (merge by business key):
+
+  attendance_records
+    Natural key: (student_uuid, academic_year_uuid, attendance_date,
+                  check_type).
+    At most ONE check_in and ONE check_out per student per day.
+    If both nodes created one:
+      KEEP the earliest recorded_at.
+      DROP the later (tombstone the later uuid).
+      Do not sum, do not keep both.
+    Delete vs create: if web deleted today's records and desktop created
+      a check after that delete's occurred_at → keep the check
+      (delete is not a wipe of the future). If delete occurred_at is
+      later → honour delete.
+
+  attendance_student_day_scans
+    Recompute from surviving records after record merge:
+      checked_in_at  = min(check_in.recorded_at) or null
+      checked_out_at = max(check_out.recorded_at) or null
+    missed_checkout_sms_sent_at: OR-merge (if either side sent, keep it).
+
+  attendance_absence_days
+    If a check_in exists for that student+date after merge → DELETE
+    absence (same as routes.js). Else keep. sms_sent_at: OR-merge.
+
+  attendance_fee_payments
+    Append-only identity by uuid. Two payments = two payments (both keep).
+    Edits (PATCH amount/note): LWW on that uuid.
+    Delete: honour if occurred_at > last update.
+
+  Unique names (class name+year, fee head name+year, academic year name,
+  username):
+    If clash on push: cloud returns conflict with the existing uuid.
+    Desktop must adopt that uuid (merge the two local rows into the
+    server uuid, remap FKs, tombstone the extra local uuid). Never
+    rename silently (Form 1 vs Form 1 would duplicate classes).
+
+  Active academic year:
+    At most one is_active=true. If two devices activate different years,
+    LWW on a single sync_meta-like row: the settings/year activate op.
+    After pull, desktop enforces "exactly one active" by applying the
+    winner and deactivating others (same as routes.js activate).
+
+Field that must not bounce:
+  password_hash: LWW. Offline login uses local hash; after pull, new
+  hash from web applies. Next desktop login needs the new password.
+
+
+--------------------------------------------------------------------------------
+14. APPLY REMOTE CHANGE (local)
+--------------------------------------------------------------------------------
+
+applyRemoteChange(change):
+
+  map = sync_id_map[table, uuid]
+  payload = rewriteUuidFksToLocalInts(change.payload)
+
+  IF change.op == delete:
+    DELETE local row by local_id if map exists
+    delete map; insert tombstone; return
+
+  IF map missing:
+    INSERT payload (omit server integer id; sqlite assigns local_id)
+    insert map(local_id, server_id, uuid)
+    return
+
+  IF map exists:
+    IF local outbox pending for uuid:
+      merged = conflict.resolve(local_row, incoming, table_rules)
+      write merged
+      if merged == incoming: drop outbox
+      else: keep/replace outbox with merged
+    ELSE:
+      UPDATE local row SET ... = incoming (local_id unchanged)
+
+  After records/absence/day_scans apply: run a small "repair day"
+  for that student_uuid + date (recompute day_scans, drop absence if
+  checked in). Same invariants as POST /check.
+
+
+--------------------------------------------------------------------------------
+15. FIRST-RUN AND PAIRING
+--------------------------------------------------------------------------------
+
+Installer does not contain school data.
+
+  1. User runs MPASAT-Attendance-Setup.exe → installs to
+     %LOCALAPPDATA%\Programs\MPASAT Attendance\
+     shortcuts: Desktop + Start Menu, app icon on both.
+  2. First launch: empty sqlite, bootstrap admin/accountant so the
+     school can at least open the app if the internet is down.
+     Banner: "Not connected to school server — working locally.
+              Connect when online to sync with the web system."
+  3. Connect flow (Settings or first-run modal):
+       Cloud URL  (prefill production URL in build)
+       Pairing code (admin generates on live web: one-time, 10 min)
+     POST /api/sync/register → deviceToken.
+  4. GET /api/sync/snapshot → replace local business tables
+     (keep device_id). Re-seed is skipped.
+     Download all photos into media\.
+  5. If first launch is offline and they create students, then later
+     pair: PUSH local outbox first, THEN pull. Do not wipe local data
+     on first snapshot if outbox is non-empty. Instead: push, then
+     pull to merge. Snapshot-replace only when outbox empty AND
+     student count is the bootstrap zero-data state.
+
+Multiple PCs: each has its own device_id. All pair to the same cloud.
+That is the supported topology (office PC + spare PC).
+
+
+--------------------------------------------------------------------------------
+16. AUTH ON DESKTOP
+--------------------------------------------------------------------------------
+
+Same login UI. JWT signed with a desktop-only JWT_SECRET stored in
+%APPDATA%\MPASAT-Attendance\secrets.json (generated at first launch,
+never the cloud JWT_SECRET).
+
+Session can be long (e.g. 72h) because the app is on a trusted school
+PC. Cookie + Bearer still work (same-origin localhost).
+
+Users table syncs. Adding an accountant on the web → appears on desktop
+after pull. Password changes apply after pull.
+
+Do not implement "offline cached last user without password". Always
+require password against local bcrypt hash.
+
+
+--------------------------------------------------------------------------------
+17. ELECTRON SHELL DETAILS
+--------------------------------------------------------------------------------
+
+  • Single instance lock. Second click focuses the existing window.
+  • BrowserWindow: width 1280, height 800, min 1024×640, background
+    matching app chrome, icon: build/icon.ico.
+  • webPreferences: contextIsolation true, nodeIntegration false,
+    sandbox true. Camera permission: grant for 127.0.0.1
+    (html5-qrcode getUserMedia).
+  • Load UI from the local Express static folder (vite build output),
+    not file:// (file:// breaks fetch, fonts, and camera in subtle ways).
+  • Bundle Poppins in web-front/public/fonts and @font-face in CSS.
+    Remove the Google Fonts <link> for the desktop build.
+  • Print (ID cards, reports): window.print / jspdf — already client-side.
+  • Close to tray optional later; v1 close = quit, syncOnce on before-quit
+    with a 8s timeout so a last push can finish.
+  • Auto-update of the .exe (electron-updater) is OPTIONAL and separate
+    from data sync. Do not confuse "app update" with "data sync" in the UI.
+
+Sync status component (web-front, tiny):
+  dots: Offline | Syncing | Synced just now | Sync error — tap to retry.
+  Reads GET /api/desktop/sync-status from the local server.
+
+
+--------------------------------------------------------------------------------
+18. INSTALLER (.exe) ALGORITHM
+--------------------------------------------------------------------------------
+
+Tool: electron-builder, target nsis, one-click.
+
+  productName:  MPASAT Attendance
+  appId:        com.mpasat.attendance.desktop
+  artifact:     MPASAT-Attendance-Setup-${version}.exe
+  icon:         desktop/build/icon.ico
+                Generate from a 1024 PNG of the school/app mark.
+                Include 16, 32, 48, 256. The current web favicon.svg
+                (purple bolt) can be the v1 mark if no school logo asset
+                is provided; also use it as the window icon.
+  nsis:
+    oneClick: true
+    perMachine: false          (no admin required — any PC, any user)
+    allowToChangeInstallationDirectory: false
+    createDesktopShortcut: true
+    createStartMenuShortcut: true
+    shortcutName: MPASAT Attendance
+    installerSidebar / uninstaller: optional branding
+    runAfterFinish: true
+  files:
+    pack electron/*, mobile-back/* (no .env, no node_modules from
+    cloud secrets), web-front/dist/*, production node_modules
+    (better-sqlite3 rebuilt for Electron ABI).
+  extraResources: none required if media lives in userData.
+
+Build pipeline:
+
+  1. web-front:  vite build --mode desktop
+       env: VITE_API_URL empty, base './' or served at /
+  2. Rebuild better-sqlite3 for Electron (electron-rebuild).
+  3. electron-builder --win nsis
+  4. Output Setup .exe. Code-sign if a certificate exists
+     (unsigned = SmartScreen warning; document for the school).
+
+Uninstall: remove Program Files/Local Programs app. Leave
+%APPDATA%\MPASAT-Attendance\ (sqlite + photos) unless user ticks
+"delete school data". Never delete data by default.
+
+
+--------------------------------------------------------------------------------
+19. SECURITY
+--------------------------------------------------------------------------------
+
+  • API binds 127.0.0.1 only (not 0.0.0.0). Other LAN machines must
+    not hit this SQLite.
+  • CORS: same-origin only.
+  • Cloud pairing token in userData, not in the installer.
+  • No DATABASE_URL, FTP_*, TWILIO_*, JWT_SECRET (cloud) in the exe.
+  • Cloud /api/sync/* must not be callable with a staff JWT; device
+    token only. Rate-limit snapshot.
+  • SQLite file ACLs: user-only. Optional SQLCipher later; v1 is
+    "school office PC" trust.
+  • Photos are student PII; media\ is not world-readable.
+
+
+--------------------------------------------------------------------------------
+20. IMPLEMENTATION PHASES (DO IN THIS ORDER)
+--------------------------------------------------------------------------------
+
+Phase 0 — Cloud prerequisites (must land on live server first)
+  • uuid + row_version + deleted_at + updated_at on all attendance_*
+    tables; backfill uuids.
+  • generateBarcode() opaque (no local integer year in new codes).
+  • sync_change_log written from every cloud mutation (wrapper around
+    pool.query INSERT/UPDATE/DELETE or a dedicated log helper called
+    at the end of each route).
+  • /api/sync/register, snapshot, push, pull, media.
+  • notify_log to dedupe SMS.
+  • Pairing-code UI on existing web Settings (admin only).
+
+Phase 1 — Desktop local app (offline only, no sync yet)
+  • dbSqlite + dialect + initSqlite.
+  • storageLocal; photo route streams disk.
+  • serverDesktop.js serves UI + /api/attendance.
+  • Electron shell, icon, camera permission, bundled fonts.
+  • Prove: register student, scan check-in/out, fees, PDFs, Excel,
+    login as admin and accountant, all with Wi-Fi off.
+
+Phase 2 — Outbox + id map (still no cloud)
+  • mutate() wrapper on all writes.
+  • Inspect outbox after each UI action (dev tools / sqlite).
+
+Phase 3 — Sync engine
+  • Pairing, snapshot, push, pull, media, conflict rules.
+  • Test matrix in §21.
+
+Phase 4 — Installer
+  • electron-builder NSIS, icon, shortcuts, first-run pairing.
+  • Install on a clean Windows VM with no Node installed.
+
+Phase 5 — Hardening
+  • Sync status UI, backoff, last-push-on-quit, backup sqlite
+    (copy data.sqlite to backups\ on a successful sync daily).
+  • Optional electron-updater.
+
+
+--------------------------------------------------------------------------------
+21. TEST MATRIX (MUST PASS BEFORE SCHOOL ROLLOUT)
+--------------------------------------------------------------------------------
+
+Offline
+  [ ] Fresh install, no internet: login bootstrap admin, create year,
+      class, student with photo, check-in, checkout, fee payment, PDF.
+  [ ] Camera barcode scan works.
+  [ ] Google-font-free UI (no blank text).
+  [ ] Absent scheduler marks absence without crashing (no Twilio).
+
+First sync
+  [ ] Pair with live server; snapshot fills years/students/fees/photos.
+  [ ] Bootstrap users replaced/merged; can login with cloud passwords.
+
+Desktop → web
+  [ ] Offline student create → go online → student appears on web with
+      photo and same barcode.
+  [ ] Offline check-in → appears on web records; guardian SMS sent once.
+  [ ] Offline fee payment → appears on web; balances match to the cent.
+
+Web → desktop
+  [ ] Register student on web → desktop pull → student + photo present.
+  [ ] Settings change on web (school times / SMS flags) → desktop.
+  [ ] Delete record on web → desktop record gone.
+  [ ] Activate a different year on web → desktop active year matches.
+
+Conflicts
+  [ ] Same student check-in on web AND desktop same day → one record,
+      earliest time, one SMS, both UIs show checked in.
+  [ ] Edit student name on both → one winner, no duplicate students.
+  [ ] Two devices create class "Form 2" → one class after sync, students
+      remapped, no orphan class_id.
+  [ ] Payment A on desktop, payment B on web, same student → both kept,
+      balance = A+B.
+
+Failure
+  [ ] Kill app mid-push; restart; no duplicate students/payments.
+  [ ] Cloud 500 on push; outbox retained; retry succeeds.
+  [ ] Photo upload fails; student JSON is not pushed until photo ok.
+
+Installer
+  [ ] Double-click Setup.exe on a PC without Node/Git.
+  [ ] Desktop shortcut shows the icon; window icon matches.
+  [ ] Uninstall leaves or removes data per checkbox.
+
+
+--------------------------------------------------------------------------------
+22. WHAT NOT TO DO
+--------------------------------------------------------------------------------
+
+  • Do not point the React UI at the cloud API from the desktop.
+    Split-brain (some calls local, some live) will corrupt IDs.
+  • Do not use integer IDs on the wire.
+  • Do not put Postgres in the installer.
+  • Do not sync web_* CMS tables.
+  • Do not send SMS from the PC.
+  • Do not LWW attendance_records (would drop a real check-in).
+  • Do not replace sqlite with a snapshot when local outbox has data.
+  • Do not rewrite routes.js into a second "desktopRoutes.js".
+  • Do not keep using Google Fonts or remote photo URLs as the only copy.
+
+
+--------------------------------------------------------------------------------
+23. SUCCESS DEFINITION
+--------------------------------------------------------------------------------
+
+A staff member can install MPASAT Attendance from a single .exe, see
+the school icon on the desktop, open the same admin/accountant app they
+know, take attendance and collect fees with no internet, and when the
+PC later gets internet the live website shows those exact changes — and
+the reverse — without duplicate students, duplicate check-ins, double
+SMS, or wrong fee balances.
+
+================================================================================
+  END OF SPEC
+================================================================================
+
+
+
+git add server.js sync/cloudRoutes.js sync/apply.js sync/tables.js sync/engine.js sync/desktopRoutes.js
+git commit -m "Fix sync boot crash that took the API down with 502"
+git push origin master

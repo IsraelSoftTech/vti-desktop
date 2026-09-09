@@ -1,0 +1,777 @@
+MPASAT guardian SMS — refined algorithm
+=======================================
+Written: 2026-08-15 (refined)
+Status: spec — implement from this file
+Scope: cloud API sends SMS. Desktop never sends; it uploads records, then
+       the school server notifies. Web and mobile Settings stay in lockstep.
+       Part B (below) specifies the parent mobile app: barcode linking,
+       push notifications, admin chat, read-only fees.
+
+
+Rules (locked)
+--------------
+1. Pairing is configurable by which weekdays the school runs. Consecutive
+   school dates become the pairs. That produces:
+
+     Mon-start (Mon–Fri):
+       Mon–Tue, Wed–Thu, Fri–next Mon, Tue–Wed, …
+
+     Tue-start with Saturday in session (Tue–Sat):
+       Tue–Wed, Thu–Fri, Sat–next Tue, Wed–Thu, Fri–Sat, Tue–Wed, …
+
+   Saturday never pairs with Sunday. It pairs with the next school day
+   (Tuesday in the example above).
+
+2. Daily SMS is only for students who MISS a check. Cadence is set to
+   once a day or twice a day.
+
+3. Students who do not miss a check never receive a daily SMS.
+
+4. Students who do not miss receive exactly one SMS: the pair summary,
+   sent only at the 2nd check-out of that pair.
+
+5. Every SMS is informative and at most 160 characters (one GSM page).
+
+6. The pair summary lists each pair day with check-in and check-out
+   times, then one overall attendance line for the pair.
+
+7. Every SMS (misser daily or completer pair summary) uses this envelope:
+
+     Greetings, {Guardian name}, Your Child {student name}, {body} MPASAT
+
+   Body always includes the concerned date(s) and time(s). The message
+   always ends with MPASAT.
+
+8. All times use one clock: Cameroon (Africa/Douala, WAT, UTC+1, no DST).
+   School start, school end, check-in open, check-in/out scans, reminder
+   thresholds, SMS printed times, and “today” for pairing must share the
+   same HH:mm format and the same timezone. A UTC server clock must never
+   decide when a miss SMS fires or what time is printed in the message.
+
+
+0. What exists today (baseline to replace)
+------------------------------------------
+Today every successful scan can SMS the guardian (once or twice per day).
+Absence / missed-checkout reminders already exist.
+
+That daily-for-everyone behaviour is removed. After this spec:
+
+  Completer  → silent until 2nd check-out of the pair, then one summary.
+  Misser     → daily SMS only, once or twice, on the day they miss.
+  Never both for the same pair.
+
+
+1. Settings
+-----------
+When Send SMS is on, the miss-only + 2nd-checkout rules are always in
+force. They are not optional toggles.
+
+  notifySmsEnabled              master. Off = nothing is sent.
+  schoolWeekDays                ISO weekdays 1=Mon … 7=Sun.
+                                Default [1,2,3,4,5] (Mon–Fri).
+                                Tick every day the school is in session.
+                                The earliest ticked day is the week start.
+  guardianMessagesPerDay        1 | 2. Applies ONLY to missers.
+                                2 = SMS at missed check-in AND at missed
+                                    check-out (two possible SMS that day).
+                                1 = one SMS that day covering the miss
+                                    (sent at the later applicable reminder).
+  absentCheckinReminderMinutes  when a missed check-in is declared.
+  missedCheckoutReminderMinutes when a missed check-out is declared.
+
+UI (Notifications tab), same on web and mobile:
+
+  1. Send SMS to guardians
+  2. School days — Mon Tue Wed Thu Fri Sat Sun chips.
+     Live preview of upcoming pairs from those chips, e.g.
+     “Pairs: Tue–Wed, Thu–Fri, Sat–next Tue”.
+  3. SMS for students who miss a check
+       Twice per day — one SMS if they miss check-in, another if they
+                       miss check-out.
+       Once per day  — one SMS that day about whatever they missed.
+  4. Existing reminder delays (Check-in / Check-out reminder minutes).
+
+Need at least one school day. Pairing needs dates to walk; a single
+ticked day still pairs this occurrence with the next occurrence
+(e.g. every Saturday with the next Saturday).
+
+Time fields (Academics school hours AND attendance check-in/out AND
+reminders) are all HH:mm 24-hour Cameroon wall time. The UI must show
+and save the same format for school start, school end, check-in opens,
+and the times later printed next to check-in/check-out in SMS.
+
+
+2. Definitions
+--------------
+School day
+  Local date whose weekday is in schoolWeekDays. Unticked weekdays are
+  not school days: no pair slot, no absence scheduler. A public holiday
+  that falls on a ticked weekday still occupies a slot until a holiday
+  calendar exists.
+
+School-date sequence
+  From the academic year start_date, take the first school day on or
+  after that date as origin. Then every later school date in order.
+
+Pair
+  Consecutive school dates: (d0,d1), (d2,d3), (d4,d5), …
+
+    origin  = first school day on/after year.start_date
+    index   = count of school days from origin through today, minus 1
+    pairId  = floor(index / 2)
+    slot    = index % 2          // 0 = Day 1, 1 = Day 2
+    day1    = this date if slot 0, else previous school date
+    day2    = this date if slot 1, else next school date
+
+  Day 2 may be next week (Fri→Mon, Sat→Tue). That wrap is the next
+  school date, not a special weekend rule.
+
+Check (per student, per date)
+  check-in  = earliest check_in scan that day
+  check-out = latest check_out scan that day
+
+Complete day
+  Both check-in and check-out exist. Late is still complete.
+
+Miss
+  Missed check-in:  no check-in by Cameroon school start + absentCheckinReminderMinutes.
+  Missed check-out: check-in exists, no check-out by Cameroon school end +
+                    missedCheckoutReminderMinutes.
+  Lateness is not a miss. Compare scan time and school hours in Africa/Douala,
+  never in the server’s local zone.
+
+Pair-completer
+  Day 1 complete AND Day 2 complete (the 2nd check-out just happened).
+  Four scans present. Late allowed.
+
+Pair-broken
+  Any miss on Day 1 or Day 2. Once broken, that pair never gets a pair
+  summary, even if the student later finishes Day 2.
+
+
+3. Two tracks (always)
+----------------------
+TRACK COMPLETE — student has not missed in this pair
+
+  Day 1 check-in  → no SMS
+  Day 1 check-out → no SMS
+  Day 2 check-in  → no SMS
+  Day 2 check-out → one pair summary (kind: pair_summary), once.
+
+TRACK MISS — a miss was declared on this pair
+
+  No pair summary for this pair, ever.
+  Daily SMS only, honouring once vs twice (section 4).
+  Successful scans after a miss still send no “you checked in” SMS.
+  The miss already notified the guardian.
+
+
+4. Misser cadence (once vs twice)
+---------------------------------
+Twice per day (guardianMessagesPerDay = 2)
+
+  At check-in reminder, if no check-in:
+    send missed-check-in SMS (kind: absence). Mark pair broken.
+  At check-out reminder, if check-in and no check-out:
+    send missed-check-out SMS (kind: missed_checkout). Mark pair broken.
+  Same day can produce two SMS if they miss both (they came for neither
+  in, or they missed in… if they missed in they have no check-in, so
+  missed-check-out does not also fire — no in means the in-miss already
+  covered the day). So twice means: one SMS per missed slot, max two,
+  and missed-out only runs when they did check in.
+
+Once per day (guardianMessagesPerDay = 1)
+
+  Do not send at the check-in reminder.
+  At the check-out reminder time (or at check-in reminder if they never
+  had a chance to check out because they never came — use the later of
+  the two thresholds that has already passed, but still only one SMS):
+
+    If no check-in:           one absence SMS.
+    If in and no check-out:   one missed-check-out SMS.
+    If both present:          send nothing (they did not miss).
+
+  Never two miss SMS on the same student + date.
+
+Dedup: absence_days.sms_sent_at and missed_checkout_sms_sent_at stay
+the once-only flags. Pair summary uses summary_sms_sent_at per pairId.
+
+Reminder “now” is Cameroon minutes-from-midnight, not process timezone.
+If the API host is UTC, 07:30 school start is 07:30 in Douala (06:30 UTC).
+The miss SMS must not fire at 07:30 UTC.
+
+
+5. Decision tree
+----------------
+On a successful scan, and on each scheduler tick:
+
+  0. SMS master off → stop.
+  1. Today not a school day → stop (no miss jobs, no pair summary).
+  2. Resolve pairId, slot, day1, day2.
+  3. MISS (scheduler):
+       Mark pair broken.
+       Send misser SMS per section 4.
+       Stop.
+  4. SUCCESSFUL scan:
+       If pair already broken → stop (no success SMS).
+       If this is Day 2 check-out AND Day 1 complete AND Day 2 complete
+         AND pair summary not yet sent → send pair summary. Stop.
+       Otherwise → stop (completer silence).
+
+
+6. Message envelope and 160-character cap
+-----------------------------------------
+Every SMS:
+
+  Greetings, {guardian}, Your Child {student}, {body} MPASAT
+
+Rules:
+  - Guardian name = student.guardian_name, else "Guardian".
+  - Student name  = student.full_name.
+  - Dates as dd/MM Cameroon calendar date (add /yyyy only if it still fits).
+  - Times as HH:mm 24-hour Africa/Douala, same format as school start/end
+    and check-in/check-out settings (always five characters, e.g. 07:30).
+  - Missing time shown as "--:--".
+  - Never print UTC or the server’s local time in a message.
+  - Always end with a space then MPASAT (no extra "Thank you").
+  - Hard cap 160 characters. Build full text, then if over cap:
+      1. Truncate guardian to 12 chars.
+      2. Truncate student to 14 chars.
+      3. Drop the overall-summary clause first, keep dates and times.
+      4. If still over, drop seconds already gone; shorten "Greetings,"
+         is not allowed — keep the required envelope words.
+      5. Last resort: truncate body so envelope + " MPASAT" fit.
+
+Kind: absence (missed check-in, twice or once)
+  Body: "no check-in {dd/MM}. Marked absent."
+  Example (fits well under 160):
+    Greetings, Mary Ngu, Your Child Jean Pierre, no check-in 15/08. Marked absent. MPASAT
+
+Kind: missed_checkout (missed check-out, twice or once)
+  Body: "on {dd/MM} in {HH:mm}, no check-out. Incomplete day."
+  Example:
+    Greetings, Mary Ngu, Your Child Jean Pierre, on 15/08 in 07:45, no check-out. Incomplete day. MPASAT
+
+Kind: pair_summary (completer, 2nd check-out only)
+  Body must include BOTH pair days, each with in and out, then an
+  overall line:
+
+    {dd/MM} in {in1} out {out1}; {dd/MM} in {in2} out {out2}. {overall}
+
+  Overall (pick the first that applies):
+    Both days complete, neither late:
+      "Full attendance."
+    Both complete, any late in or early out:
+      "Present both days, {n} late."
+    (Completer track never has a missing scan; if a scan is missing
+     this message is not sent.)
+
+  Example:
+    Greetings, Mary Ngu, Your Child Jean Pierre, 12/08 in 07:32 out 15:40; 13/08 in 07:28 out 15:38. Full attendance. MPASAT
+
+  If Day 1 is Friday and Day 2 is next Monday, those two calendar dates
+  still appear separately. The guardian must see two different dates.
+
+
+6b. Time clock — Cameroon, one format everywhere
+------------------------------------------------
+Why this exists: miss SMS and pair summaries must not fire or print a
+time that is not Cameroon school time. A cloud server in UTC is one hour
+behind WAT. Using Date#getHours() or toLocaleTimeString() without a
+timezone would send “07:30” messages at 08:30 in Cameroon, or print
+06:30 in the SMS for a 07:30 check-in.
+
+Single zone
+  IANA: Africa/Douala (Cameroon, WAT, UTC+1, no daylight saving).
+  Africa/Lagos is the same offset; Douala is the name to use in code.
+
+Single format
+  Wall clock: HH:mm 24-hour, zero-padded, 00:00–23:59.
+  Same string shape for:
+    - Academics school start
+    - Academics school end (and per-class overrides)
+    - Check-in opens at
+    - Check-in time printed in SMS
+    - Check-out time printed in SMS
+    - Pair summary in/out times
+  Do not mix “7:30”, “07:30:00”, “7:30 AM”, or ISO timestamps in SMS.
+
+Single calendar day
+  “Today” for pairing, attendance_date, and the scheduler is the
+  Cameroon calendar date, not the UTC date. Around midnight UTC the
+  school day in Douala is already the next morning; using UTC “today”
+  would attach scans and miss jobs to the wrong pair day.
+
+How to compare
+  School start/end and check-in opens are stored as TIME / HH:mm
+  (no zone in the column). They mean Douala wall time.
+  Scan recorded_at is timestamptz. Convert it to Africa/Douala HH:mm
+  and dd/MM before: lateness, SMS body, and any display.
+  Scheduler now = Africa/Douala hours*60+minutes, compared to
+  parse(schoolStart)+reminder and parse(schoolEnd)+reminder.
+
+Settings that must match this clock
+  schoolStartTime, schoolEndTime, class school hours,
+  checkInOpensAt, recorded check-in, recorded check-out,
+  absentCheckinReminderMinutes (offset from Douala school start),
+  missedCheckoutReminderMinutes (offset from Douala school end).
+
+Refuse to save a time that is not HH:mm. Normalise on read with slice(0,5).
+
+
+7. Worked examples
+------------------
+School days Tue–Sat. Pairs: Tue–Wed, Thu–Fri, Sat–next Tue.
+Missers = twice. SMS on.
+
+  A. Perfect Tue–Wed
+     Tue in/out, Wed in/out.
+     SMS: none until Wednesday check-out → one pair summary for Tue+Wed.
+
+  B. Missed Tuesday check-in
+     Tue reminder → absence SMS. Pair broken.
+     Wednesday: even if they scan all day, no pair summary, no daily
+     SMS unless they also miss Wednesday.
+
+  C. Tue complete, missed Wednesday check-out
+     Tue silent. Wed in silent. Wed reminder → missed-check-out SMS.
+     No pair summary.
+
+  D. Late Tuesday in, otherwise complete
+     Still completer. Pair summary at Wednesday out, overall
+     "Present both days, 1 late."
+
+  E. Saturday + next Tuesday complete
+     Sat silent. Next Tue in silent. Next Tue out → pair summary
+     listing Saturday’s date/times and Tuesday’s date/times.
+
+  F. Missers set to once, missed check-in
+     No SMS at the check-in reminder. One absence SMS at the
+     check-out reminder time that day.
+
+
+8. Persistence
+--------------
+Existing flags stay:
+  attendance_absence_days.sms_sent_at
+  attendance_student_day_scans.missed_checkout_sms_sent_at
+
+New:
+
+  attendance_settings.school_week_days  TEXT  default '1,2,3,4,5'
+  guardian_messages_per_day stays 1 | 2 = misser cadence only
+
+  attendance_sms_pairs (
+    student_id, academic_year_id, pair_id,
+    day1_date, day2_date,
+    broken boolean not null default false,
+    summary_sms_sent_at timestamptz,
+    primary key (student_id, academic_year_id, pair_id)
+  )
+
+Do not add sms_miss_only or sms_summary_at_second_checkout columns.
+Those behaviours are fixed by this spec whenever SMS is enabled.
+
+
+9. Desktop / sync
+-----------------
+Desktop does not send SMS. Cloud maybeNotifyNewRecord uses this same
+tree when a scan arrives from a device. Scheduler runs on the cloud
+process only. attendance_sms_pairs is cloud-side; no desktop sync.
+
+
+10. Refusals
+------------
+  - Daily SMS to a student who completed every check in the pair.
+  - Pair summary to a student who missed any check in the pair.
+  - Pair summary before Day 2 check-out.
+  - Treating lateness as a miss.
+  - Pairing an unticked weekday (Sunday when Sunday is off).
+  - Pairing Saturday with Sunday if Sunday is not a school day.
+  - Messages longer than 160 characters.
+  - Messages that omit guardian, student, date, or MPASAT.
+  - “2nd check-out in the child’s lifetime” — it is Day 2 of the pair.
+  - Using the server’s local timezone or UTC for “now”, school day, or
+    SMS times.
+  - Printing check-in/out in a different format from school start/end.
+  - Mixing 12-hour AM/PM with 24-hour HH:mm.
+
+
+11. Implementation order
+------------------------
+  1. school_week_days + attendance_sms_pairs (Postgres + sqlite).
+  2. Africa/Douala clock helper: today, HH:mm, minutes-from-midnight.
+     Replace process-local Date getters in scheduler and SMS formatters.
+  3. Pair helper from schoolWeekDays + Cameroon year/today dates.
+  4. Message builders with 160-cap + envelope + Douala HH:mm.
+  5. notifyGuardianOnCheck: completer silence / pair summary only.
+  6. Scheduler: Cameroon school-day gate, misser once/twice, mark pair broken.
+  7. Settings UI: school-day chips + misser once/twice + pair preview.
+     Time pickers all HH:mm (school start/end and check-in opens).
+  8. Messages page: kind label “Pair summary”.
+
+Do not keep today’s “SMS on every successful scan” path once this ships.
+
+
+========================================================
+PART B — Parent mobile app
+========================================================
+Parents are a new login role on the same Expo app. They do not take
+attendance, register students, or change fees. They monitor linked
+children (barcode), get phone notifications, chat with school admin,
+and view fee statements read-only.
+
+
+12. Parent account and first-run linking
+----------------------------------------
+Role
+  attendance_parent. Distinct from attendance_admin and
+  attendance_accountant. After login, the app opens the parent shell,
+  never the staff tabs.
+
+Create account
+  Register on the mobile app: full name, phone (Cameroon number, unique),
+  password. Phone is the login username. Same API as staff login with
+  role on the token.
+
+First open (once)
+  After the first successful login, before the home screen:
+
+    1. Ask: “How many students do you want to monitor?”
+       Integer 1–10. Default 1.
+    2. Show that many barcode fields (one if 1, two if 2, …).
+    3. Parent types each child’s BARCODE (the number on the ID card).
+    4. Proceed:
+         - Each barcode must exist in the active academic year.
+         - Duplicates in the form are rejected.
+         - Unknown barcode: “No student with that barcode.”
+         - Already linked to this parent: skip quietly (idempotent).
+    5. Save links. Mark first-run complete. Open the parent home
+       listing those students.
+
+  This wizard must not appear again on that account. Adding more
+  children later is section 14.
+
+Home
+  One card per linked student: photo, name, class, barcode. Tap for
+  today’s attendance (in/out times in Africa/Douala HH:mm) and recent
+  miss / pair-summary notices.
+
+
+13. Notification bell and lock-screen push
+------------------------------------------
+In-app bell
+  The parent top bar bell is real (not a decorative badge). Badge =
+  unread count for this parent. Tap opens a notification list:
+  attendance (miss / pair summary) and admin chat, newest first.
+  Mark read on open.
+
+Push (app closed or background)
+  Every event that would notify this parent also sends an OS push:
+  title, body, sound (notification bell), shows on the lock screen.
+  Tapping the push opens the matching screen (student day or chat).
+
+  Channel: Expo push (same mobile app). Token stored per parent
+  device. Cameroon-facing text; times in HH:mm Africa/Douala.
+
+  Events that push:
+    - Missed check-in / missed check-out for a linked student
+      (same moment the guardian SMS would send).
+    - Pair summary at 2nd check-out for a linked completer.
+    - New chat message from school admin.
+
+  Staff (admin / accountant) do not get these parent pushes.
+
+
+14. Add students later
+----------------------
+Parent home: “Add student”. Enter one barcode → Proceed.
+Same validation as first-run. Parent can remove a link (stop
+monitoring) without deleting the school student record.
+
+
+15. Parent ↔ admin chat (WhatsApp-like)
+---------------------------------------
+Parent app
+  A Chat tab: thread with the school (one thread per parent, not per
+  child). WhatsApp-like: bubbles, newest at bottom, composer, send,
+  timestamps in Africa/Douala HH:mm, unread ticks. Parent can mention
+  a child by name; the student is not a separate thread.
+
+  Parent may attach nothing in v1 (text only), to ship a reliable
+  inbox. Optional image later.
+
+Admin web (and desktop web)
+  Messages page gains two segments:
+
+    SMS     — existing SMSVAS log, credit, delivery (unchanged).
+    Parents — conversation list: parent name, phone, last message,
+              unread count. Open a thread and reply.
+
+  Admin reply is the same thread the parent sees. Sound/push to the
+  parent on admin reply (section 13).
+
+  Accountant does not see Parent chat. Only attendance_admin.
+
+  Desktop admin uses the same Messages → Parents view against the
+  cloud API (chat is not local SQLite).
+
+Store
+  attendance_parent_threads (parent_user_id, last_message_at, …)
+  attendance_parent_messages (thread_id, sender_role parent|admin,
+    sender_user_id, body, created_at Douala-display from timestamptz,
+    read_at)
+
+
+16. Parent fees (read-only)
+---------------------------
+Parent app Fee module:
+  Enter a student barcode (or pick a linked student). If the barcode
+  is not linked to this parent, refuse — do not reveal another
+  family’s balance. If linked, show the same statement staff see:
+  expected, discount, paid, balance, fee heads, payment history.
+
+  Read-only: no record payment, no discount, no print required
+  (optional share PDF later). Same Cameroon amounts as accountant.
+
+
+17. Parent persistence (cloud)
+------------------------------
+  attendance_users.role may be attendance_parent
+  attendance_parent_students (parent_user_id, student_id, barcode,
+    created_at) unique (parent_user_id, student_id)
+  attendance_parent_devices (parent_user_id, expo_push_token, …)
+  first_run_completed on parent profile or users table
+  chat tables as in section 15
+
+  Barcode is the only join key the parent types. Linking does not
+  change attendance_students.guardian_name / contact. SMS still uses
+  the student contact; push uses the parent account’s devices.
+
+
+18. Parent refusals
+-------------------
+  - Parent login opening staff Students / Attendance / Fee payment.
+  - First-run wizard every launch.
+  - Looking up fees or attendance for a barcode the parent has not
+    linked.
+  - Parent sending SMS via SMSVAS (chat is in-app, not SMS credit).
+  - Accountant using Parent chat.
+  - Silent in-app badge with no lock-screen push for miss / summary /
+    admin reply.
+
+
+19. Implementation order (full)
+-------------------------------
+SMS / pairing (Part A) first — parents consume those events:
+
+  1–8 as in section 11.
+
+Then parent app:
+
+  9.  Role attendance_parent + register/login.
+  10. First-run barcode wizard + add/remove student.
+  11. Parent home + read-only day attendance.
+  12. Expo push + real bell list.
+  13. Chat tables + parent Chat tab + admin Messages → Parents.
+  14. Parent Fee lookup (linked barcode only).
+
+
+========================================================
+PART C — Mobile app: APK, Play Store, App Store
+========================================================
+The Expo app lives in mobile-front/. Cloud builds use EAS (Expo
+account izzytech, project attendance-mobile, projectId
+26f69ee4-765d-4409-8e76-7ae0a3c33976). Android application id is
+com.vtispace.mpasat. Display name is MPASAT.
+
+The APK / store binary talks to https://api.vtispace.com (set in
+eas.json). The app can open without a new backend deploy; staff and
+parents cannot sign in unless that API is already live.
+
+
+20. One-time machine setup
+--------------------------
+On the PC that will trigger builds:
+
+  1. Install Node.js LTS (20+).
+  2. From a terminal:
+
+       cd mobile-front
+       npm install
+       npx eas login
+       npx eas whoami
+
+     Login as izzytech (izzytechteam@gmail.com). First Android build
+     on this Expo project already created a keystore on Expo’s
+     servers — keep using that keystore. Never generate a second
+     one or Play Store updates will be rejected.
+
+  3. Confirm app.json:
+
+       expo.name              MPASAT
+       expo.slug              attendance-mobile
+       expo.android.package   com.vtispace.mpasat
+       extra.eas.projectId    26f69ee4-765d-4409-8e76-7ae0a3c33976
+
+  4. Confirm eas.json profiles:
+
+       preview      → Android APK (sideload / testers)
+       production   → Android App Bundle (.aab) for Play Store
+       Both bake    EXPO_PUBLIC_API_URL=https://api.vtispace.com
+
+  5. Icon / splash already in mobile-front/assets (icon.png,
+     splash-icon.png, android-icon-foreground.png). 1024×1024 PNG.
+     Do not replace with a JPEG or a non-square file.
+
+Do not add babel.config.js unless babel-preset-expo is installed at
+the project root. A stray babel.config.js that cannot resolve
+babel-preset-expo fails EAS at “Bundle JavaScript”.
+
+Lock-screen push (Part B §13) needs a Firebase Android app with
+package com.vtispace.mpasat, file google-services.json in
+mobile-front/, and app.json android.googleServicesFile. Until that
+file exists, expo-notifications stays excluded from native linking
+in package.json so the APK does not crash on open. In-app
+notification list still works against the API.
+
+
+21. Compile an Android APK (testers / sideload)
+-----------------------------------------------
+This is the internal distribution build. Not for Play Store.
+
+       cd mobile-front
+       npm install
+       npx eas login
+       npm run build:apk
+
+  npm run build:apk is:
+
+       eas build -p android --profile preview
+
+  Watch / list builds:
+
+       npx eas build:list --platform android --limit 5
+
+  Browser:
+
+       https://expo.dev/accounts/izzytech/projects/attendance-mobile/builds
+
+  When Status is finished, open the build page and download the APK,
+  or copy Application Archive URL from the CLI. Uninstall any older
+  MPASAT on the phone first, then install. Preview auto-increments
+  versionCode on EAS (remote appVersionSource).
+
+  Optional local JS check before spending an EAS build:
+
+       npx expo export --platform android --output-dir dist-apk-test
+
+  That only proves the JS bundle. It does not produce an installable
+  APK.
+
+
+22. Play Store (Android)
+------------------------
+Play Console does not accept a raw APK for new listings. Ship an
+Android App Bundle from the production profile.
+
+Accounts
+  Google Play Console (one-time ~$25 USD), app created with
+  package name exactly com.vtispace.mpasat. That id must never
+  change after the first upload.
+
+Build the .aab
+
+       cd mobile-front
+       npx eas build -p android --profile production
+
+  Download the .aab from the finished EAS build page.
+
+Store listing (Play Console)
+  App name: MPASAT
+  Short / full description, screenshots (phone), 512×512 icon,
+  feature graphic 1024×500, privacy policy URL, content rating
+  questionnaire, target audience, Data safety form (login, photos,
+  notifications).
+
+Upload
+  Play Console → Production (or Internal testing / Closed testing
+  first) → Create release → upload the .aab. Use Internal testing
+  until a device install from the store works, then promote.
+
+Later updates
+  Same Expo keystore (already on EAS). Bump expo.version in
+  app.json (e.g. 1.0.2 → 1.0.3). EAS remote versionCode increments
+  if autoIncrement is on; production profile should also set
+  "autoIncrement": true before store releases, same as preview.
+
+  Optional submit from CLI after a production build:
+
+       npx eas submit -p android --latest
+
+  Needs a Google service-account JSON with Play Console API access
+  linked in Expo (eas credentials / submit). Manual upload in Play
+  Console is enough for the first release.
+
+
+23. App Store (iOS)
+-------------------
+iOS is not configured for a store build yet. Android package exists;
+iOS still needs a bundle id and an Apple Developer account
+(~$99 USD / year).
+
+Add to app.json before the first iOS EAS build (do not invent a
+second id later):
+
+       "ios": {
+         "bundleIdentifier": "com.vtispace.mpasat",
+         "supportsTablet": true,
+         "infoPlist": { ... existing camera / photos / mic strings ... }
+       }
+
+  bundleIdentifier should match the Android package unless Apple
+  already issued a different id.
+
+Apple side
+  1. Apple Developer → Identifiers → App ID com.vtispace.mpasat
+     with Push Notifications if lock-screen push is required.
+  2. App Store Connect → new app, bundle id com.vtispace.mpasat,
+     name MPASAT.
+  3. Expo: npx eas credentials  (or let the first eas build -p ios
+     create a distribution cert + provisioning profile on Expo).
+
+Build an IPA (store / TestFlight)
+
+       cd mobile-front
+       npx eas build -p ios --profile production
+
+  Add an ios production block in eas.json if missing, with the same
+  EXPO_PUBLIC_API_URL. First iOS build must run on a Mac-capable
+  EAS worker (default); no local Xcode required if using EAS.
+
+TestFlight then App Store
+       npx eas submit -p ios --latest
+
+  Or upload the IPA in Transporter / App Store Connect. Fill
+  screenshots (6.7" and 6.1" iPhone), privacy policy, App Privacy
+  (camera, photos, mic, notifications), review notes (test parent
+  and admin logins).
+
+  Push on iOS also needs an Apple Push key (APNs) uploaded to Expo
+  credentials, plus the Firebase / Expo push setup in §20.
+
+
+24. What not to mix up
+----------------------
+  - preview APK  = testers and sideload only.
+  - production AAB = Play Store.
+  - production IPA = TestFlight / App Store.
+  - Expo Go is not a store build and is not what parents install.
+  - Changing android.package or ios.bundleIdentifier after a store
+    listing creates a different app; updates will not replace the
+    old one.
+  - A second Android keystore cannot update the Play listing that
+    used the first keystore. Use the existing EAS Android credentials.
+  - Hosting the APK on a random file host is not “on the Play Store”.
+    Play Store = Play Console + AAB. App Store = App Store Connect + IPA.
+

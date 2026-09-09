@@ -1,0 +1,74 @@
+.primary-btn {
+  border: none;
+  border-radius: var(--radius-full);
+  padding: 13px 20px;
+  min-height: 50px;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition:
+    transform var(--transition-fast),
+    background var(--transition-fast),
+    box-shadow var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.primary-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.primary-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.primary-btn--full {
+  width: 100%;
+}
+
+.primary-btn--primary {
+  color: var(--color-white);
+  -webkit-text-fill-color: var(--color-white);
+  background: var(--color-primary);
+  box-shadow: 0 4px 14px var(--color-shadow);
+}
+
+.primary-btn--primary:hover:not(:disabled) {
+  background: var(--color-primary-dark);
+  box-shadow: 0 6px 18px var(--color-shadow);
+}
+
+.primary-btn--secondary {
+  color: var(--color-primary);
+  -webkit-text-fill-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  box-shadow: none;
+}
+
+.primary-btn--secondary:hover:not(:disabled) {
+  background: var(--color-primary-200);
+}
+
+.primary-btn__spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: primary-btn-spin 0.7s linear infinite;
+}
+
+.primary-btn--secondary .primary-btn__spinner {
+  border-color: var(--color-primary-muted);
+  border-top-color: var(--color-primary);
+}
+
+@keyframes primary-btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,124 @@
+.records-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 28px;
+}
+
+.records-tab__filter-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.records-tab__filter-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--color-primary-dark);
+  flex: 1;
+}
+
+.records-tab__clear-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.records-tab__clear {
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid;
+}
+
+.records-tab__clear:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.records-tab__clear--day {
+  background: var(--color-primary-soft);
+  border-color: var(--color-border-strong);
+  color: var(--color-primary);
+}
+
+.records-tab__clear--all {
+  background: var(--color-danger-soft);
+  border-color: #ffcdd2;
+  color: var(--color-danger);
+}
+
+.records-tab__filter-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.records-tab__analysis-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+.records-tab__analysis-row {
+  display: flex;
+  align-items: center;
+}
+
+.records-tab__analysis-item {
+  flex: 1;
+  text-align: center;
+}
+
+.records-tab__analysis-value {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--color-primary-dark);
+}
+
+.records-tab__analysis-label {
+  margin: 4px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.records-tab__analysis-divider {
+  width: 1px;
+  height: 36px;
+  background: var(--color-border);
+}
+
+.records-tab__table-title {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+.records-tab__badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.records-tab__badge--in {
+  background: var(--color-accent-teal-soft, rgba(20, 184, 166, 0.12));
+  color: var(--color-accent-teal);
+}
+
+.records-tab__badge--out {
+  background: var(--color-accent-peach-soft, #fff0e6);
+  color: #e88b4a;
+}

@@ -1,0 +1,489 @@
+================================================================================
+  STAFF ATTENDANCE MODULE — DESIGN & IMPLEMENTATION SPECIFICATION
+  Smart Attendance (MPASAT) · Period-faithful · Class-room barcode model
+  Version 1.0 · For engineering & school administration review
+================================================================================
+
+1. EXECUTIVE SUMMARY
+--------------------
+
+Staff attendance must answer a different question than student attendance:
+
+  "Was every TIMETABLE PERIOD in every CLASSROOM accounted for today —
+   and was the RIGHT teacher (or an approved substitute) physically there
+   on time?"
+
+Student check-in/check-out is binary (arrive / leave). Staff attendance is
+SLOT-BASED: one decision per (date × period × teaching room × assignment).
+
+Recommended core algorithm:
+
+  TIMETABLE SLOT RECONCILIATION (TSR)
+
+  • The timetable is the source of truth for what SHOULD happen.
+  • Class-room QR barcodes (one unique code per classroom) anchor WHERE
+    the scan happened.
+  • The logged-in staff identity (JWT) anchors WHO scanned.
+  • Server-side period clock maps WHEN the scan occurred to exactly one
+    active period (or flags ambiguity / out-of-window scans).
+  • Each slot ends in a compliance status; gaps are visible even when
+    no teacher was assigned (vacant / uncovered period).
+
+This document defines data model, workflows, APIs, reports, and rollout so
+implementation fits the existing stack: mobile-back (Express + PostgreSQL),
+mobile-front / web-front (QR scan UI), academic year scoping, barcode method.
+
+
+2. WHY NOT COPY THE STUDENT MODEL?
+----------------------------------
+
+Current student flow (reference):
+
+  POST /api/attendance/check  { checkType, barcode }
+  → resolves student by personal barcode ATT-{year}-{random}
+  → one record per check_in / check_out per day
+
+Staff need:
+
+  • Many events per day (one per teaching period, possibly multiple rooms).
+  • Location must be proven (class sticker), not only identity.
+  • Outcomes tied to timetable rows, not just timestamps.
+  • Vacant slots and wrong-room / wrong-time scans must be detected.
+  • Substitutes and split classes must be auditable.
+
+Using only "staff barcode" without room barcode proves identity, not that
+the teacher taught Form 2A in Room 4 during Period 3. Class-room stickers
+are the correct second factor for schools.
+
+
+3. RECOMMENDED ALGORITHM: TIMETABLE SLOT RECONCILIATION (TSR)
+---------------------------------------------------------------
+
+3.1 Definitions
+
+  Period          A named interval on a school day (e.g. P1 07:30–08:10).
+  Timetable slot  One row: (weekday, period_id, class_id, room_id,
+                  assigned_staff_id, subject optional).
+  Room            Physical classroom; carries a unique QR barcode sticker.
+  Scan event      (staff_id, room_barcode, recorded_at, method=barcode).
+
+3.2 High-level loop (runs continuously; batch job each night optional)
+
+  FOR each calendar date D in active academic year:
+    FOR each timetable_slot S where S.weekday = weekday(D):
+      AND D is a school day (not holiday)
+      window = [S.period_start - grace_before, S.period_end + grace_after]
+
+      events = scan_events WHERE recorded_at in window
+               AND room_id = S.room_id
+
+      IF no events:
+        mark slot S as UNCOVERED (no physical presence in that room)
+        IF S.assigned_staff_id IS NOT NULL:
+          mark assigned teacher ABSENT for slot S
+        ELSE:
+          mark slot VACANT_UNMONITORED (no assignment AND no scan)
+      ELSE:
+        pick authoritative event E (see 3.3)
+        mark room COVERED for slot S
+        resolve staff presence for S.assigned_staff_id vs E.staff_id
+        (present / late / substitute / unauthorized)
+
+3.3 Choosing the authoritative scan (when multiple scans in one window)
+
+  Priority (highest first):
+
+  1. Scan by S.assigned_staff_id in window at S.room_id → PRESENT or LATE
+  2. Scan by staff with an approved substitution record for (S, D)
+  3. Earliest scan in window at S.room_id by another staff → SUBSTITUTE
+  4. Scan at wrong room or outside window → OUT_OF_SLOT (audit only)
+  5. Conflicting scans (two teachers, same slot, same room) → REVIEW
+
+  Lateness:
+
+    LATE if E.recorded_at > S.period_start + grace_late (e.g. 5 minutes)
+    else ON_TIME
+
+3.4 Why this satisfies "all periods followed up"
+
+  • Every slot appears on a daily compliance grid (covered / uncovered).
+  • Assigned teacher absence is explicit even if another teacher scanned.
+  • Unassigned periods still require a scan OR admin closure reason
+    (assembly, cancelled, exam hall move) — otherwise UNCOVERED stays red.
+  • Reports aggregate by department, staff, room, and period.
+
+
+4. CLASS-ROOM BARCODE STRATEGY
+------------------------------
+
+4.1 Format (distinct from student ATT-* codes)
+
+  ROOM-{academic_year_id}-{class_id}-{checksum}
+
+  Example: ROOM-3-12-A7F2
+
+  • Printed once per classroom door / front wall; large QR like student IDs.
+  • class_id links to attendance_classes (Form 2A, etc.) when room is
+    dedicated; optional room table when one physical room serves multiple
+    forms on different periods.
+
+4.2 Recommended schema split
+
+  attendance_classes     (existing) — academic cohort (Form 2A)
+  attendance_rooms       (new)      — physical room + room_barcode UNIQUE
+  attendance_timetable_slots (new)  — weekday, period, class, room, staff
+
+  If school maps 1:1 class↔room, room can default from class; still store
+  room_id on slots so swaps (lab, hall) work.
+
+4.3 Scan payload at API
+
+  Teacher app sends:
+
+    POST /api/attendance/staff/scan
+    {
+      "roomBarcode": "ROOM-3-12-A7F2",
+      "clientRecordedAt": "2026-08-05T08:02:00+01:00"  // optional; server prefers NOW()
+    }
+
+  Server derives staff_id from JWT (never trust client staff id).
+  Server resolves period from server time + timetable (see §5).
+
+
+5. PERIOD ENGINE (TIME WINDOWS)
+-------------------------------
+
+5.1 Master period table (per academic year)
+
+  attendance_periods (
+    id,
+    academic_year_id,
+    name,              -- "Period 1", "Break"
+    sort_order,
+    start_time TIME,   -- 07:30
+    end_time TIME,     -- 08:10
+    is_teaching BOOLEAN DEFAULT true,
+    grace_before_min INT DEFAULT 5,
+    grace_late_min INT DEFAULT 5,
+    grace_after_min INT DEFAULT 10
+  )
+
+5.2 Resolving "current period" at scan time
+
+  function resolvePeriod(now, academicYearId, date):
+    load periods for year ordered by start_time
+    for P in periods where P.is_teaching:
+      if now in [P.start - grace_before, P.end + grace_after]:
+        return P
+    return null  → reject or store as OUT_OF_HOURS with admin review
+
+5.3 Overlaps and breaks
+
+  • Non-teaching periods (break, lunch): no slot compliance required unless
+    school enables "duty" slots.
+  • If two teaching periods overlap in config, block at admin UI — invalid.
+
+
+6. DATA MODEL (PostgreSQL — extends initDb.js pattern)
+------------------------------------------------------
+
+6.1 Staff registry (separate from login users; link optional)
+
+  attendance_staff (
+    id SERIAL PRIMARY KEY,
+    academic_year_id INT NOT NULL REFERENCES attendance_academic_years(id),
+    staff_code VARCHAR(32) NOT NULL,          -- HR id
+    full_name VARCHAR(255) NOT NULL,
+    department VARCHAR(128),
+    user_id INT REFERENCES attendance_users(id),  -- login for mobile app
+    active BOOLEAN DEFAULT true,
+    UNIQUE (academic_year_id, staff_code)
+  )
+
+  Role suggestion: attendance_teacher (new role) or reuse attendance_admin
+  with scoped permissions.
+
+6.2 Rooms & barcodes
+
+  attendance_rooms (
+    id SERIAL PRIMARY KEY,
+    academic_year_id INT NOT NULL,
+    name VARCHAR(128) NOT NULL,               -- "Room 4"
+    room_barcode VARCHAR(64) NOT NULL UNIQUE,
+    default_class_id INT REFERENCES attendance_classes(id),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )
+
+6.3 Timetable
+
+  attendance_timetable_slots (
+    id SERIAL PRIMARY KEY,
+    academic_year_id INT NOT NULL,
+    weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7),  -- ISO Mon=1
+    period_id INT NOT NULL REFERENCES attendance_periods(id),
+    class_id INT REFERENCES attendance_classes(id),
+    room_id INT NOT NULL REFERENCES attendance_rooms(id),
+    assigned_staff_id INT REFERENCES attendance_staff(id),
+    subject_name VARCHAR(128),
+    effective_from DATE,
+    effective_to DATE,
+    UNIQUE (academic_year_id, weekday, period_id, room_id, class_id)
+  )
+
+6.4 Raw scans (append-only audit)
+
+  attendance_staff_scans (
+    id SERIAL PRIMARY KEY,
+    academic_year_id INT NOT NULL,
+    staff_id INT NOT NULL REFERENCES attendance_staff(id),
+    room_id INT NOT NULL REFERENCES attendance_rooms(id),
+    period_id INT REFERENCES attendance_periods(id),  -- filled server-side
+    timetable_slot_id INT REFERENCES attendance_timetable_slots(id),
+    scan_date DATE NOT NULL,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    method VARCHAR(16) NOT NULL DEFAULT 'barcode',
+    resolution VARCHAR(32),   -- on_time, late, out_of_slot, duplicate
+    metadata JSONB
+  )
+
+  UNIQUE partial index (recommended):
+    one successful claim per (staff_id, timetable_slot_id, scan_date)
+    for assigned/substitute resolution — duplicates → duplicate flag only.
+
+6.5 Daily slot compliance (materialized / upserted by TSR job or on scan)
+
+  attendance_staff_slot_compliance (
+    id SERIAL PRIMARY KEY,
+    academic_year_id INT NOT NULL,
+    compliance_date DATE NOT NULL,
+    timetable_slot_id INT NOT NULL REFERENCES attendance_timetable_slots(id),
+    status VARCHAR(32) NOT NULL,
+    /*
+      COVERED_ON_TIME
+      COVERED_LATE
+      UNCOVERED
+      VACANT_UNMONITORED
+      SUBSTITUTE
+      CANCELLED_EXCUSED   (admin reason)
+    */
+    assigned_staff_id INT,
+    actual_staff_id INT,
+    staff_scan_id INT REFERENCES attendance_staff_scans(id),
+    computed_at TIMESTAMPTZ DEFAULT NOW(),
+    note TEXT,
+    UNIQUE (compliance_date, timetable_slot_id)
+  )
+
+6.6 Substitutions & exceptions
+
+  attendance_staff_substitutions (
+    id SERIAL PRIMARY KEY,
+    timetable_slot_id INT NOT NULL,
+    substitution_date DATE NOT NULL,
+    substitute_staff_id INT NOT NULL REFERENCES attendance_staff(id),
+    approved_by INT REFERENCES attendance_users(id),
+    UNIQUE (timetable_slot_id, substitution_date)
+  )
+
+  attendance_slot_exceptions (
+    id SERIAL PRIMARY KEY,
+    timetable_slot_id INT NOT NULL,
+    exception_date DATE NOT NULL,
+    reason VARCHAR(64),  -- holiday, exam, assembly, room_change
+    note TEXT,
+    UNIQUE (timetable_slot_id, exception_date)
+  )
+
+
+7. API SURFACE (mobile-back /api/attendance)
+--------------------------------------------
+
+  Admin / setup
+    GET/POST   /staff                    — CRUD staff
+    GET/POST   /rooms                    — CRUD rooms + generate room_barcode
+    GET/POST   /periods                  — period definitions
+    GET/POST   /timetable/slots          — bulk import CSV/Excel
+    POST       /timetable/import         — validate overlaps
+
+  Teacher mobile
+    POST       /staff/scan               — room barcode + JWT
+    GET        /staff/my-day?date=       — today's slots + scan status
+    GET        /staff/period/current     — which period is active now
+
+  Compliance / reports
+    GET        /staff/compliance/daily?date=
+    GET        /staff/compliance/weekly?from=&to=
+    GET        /staff/compliance/uncovered?date=   — action list for HOD
+    PATCH      /staff/compliance/:id     — admin excused / note
+
+  Reuse existing QrScanModal pattern; second screen label "Scan class QR".
+
+
+8. USER WORKFLOWS
+-----------------
+
+8.1 Teacher (start of each period)
+
+  1. Open app → Staff attendance → "Scan class QR".
+  2. Scan ROOM-* sticker on classroom wall.
+  3. App shows: Period 3 · Form 2A · Room 4 · ON TIME (or LATE).
+  4. If wrong room or wrong period window → clear error, no silent success.
+
+8.2 Head of department / admin (end of day)
+
+  1. Open Daily compliance grid: rows = periods, columns = rooms/classes.
+  2. Filter UNCOVERED and VACANT_UNMONITORED.
+  3. Call teachers or enter substitution / exception.
+  4. Export PDF for principal (same stack as class reports).
+
+8.3 Principal metric
+
+  coverage_rate(D) = covered_slots / total_teaching_slots(D)
+  staff_punctuality(D) = on_time / covered_slots assigned to present staff
+
+
+9. FRAUD & EDGE CASES
+---------------------
+
+  • Staff must be authenticated; room barcode alone is insufficient.
+  • Debounce scans: ignore duplicate (same staff, room, period) within 60s.
+  • Optional: geofence / Wi‑Fi SSID check later — not required for v1.
+  • Teacher scanning from photo of QR: mitigate with short-lived dynamic
+    QR rotation (v2); v1 accept physical sticker threat model like students.
+  • Split team-teaching: allow secondary_staff_id on slot or two allowed
+    staff_ids; compliance = at least one assigned scans.
+  • Room change: update slot for date range; old scans map only if room_id
+    matches event.
+
+
+10. IMPLEMENTATION PHASES
+-------------------------
+
+  Phase 1 — Foundation (2–3 weeks)
+    • Tables: staff, rooms, periods, timetable_slots, staff_scans
+    • Room barcode generation + print sheet (reuse idCardPdf QR pipeline)
+    • POST /staff/scan + period resolver
+    • Teacher "my day" list
+
+  Phase 2 — TSR compliance (1–2 weeks)
+    • slot_compliance upsert on scan + nightly reconcile job
+    • Daily uncovered report UI (web-front)
+    • Substitutions + exceptions
+
+  Phase 3 — Operations (1 week)
+    • Timetable Excel import
+    • Weekly analytics, export PDF
+    • Optional SMS/email digest to HOD when UNCOVERED > threshold
+
+  Phase 4 — Hardening
+    • Audit log, role attendance_hod
+    • Dashboard widgets on existing HomeScreen
+
+
+11. ALIGNMENT WITH EXISTING CODEBASE
+------------------------------------
+
+  • Barcode scanning: web-front QrScanModal + mobile QrScanModal — same UX
+    as student attendance; new API endpoint only.
+  • Academic year: all queries scoped by requireActiveYear() like routes.js.
+  • Barcode generation: mirror helpers.generateBarcode() → generateRoomBarcode()
+  • Auth: extend attendance_users roles; map staff.user_id for teachers.
+  • SMS: optional notify HOD on UNCOVERED critical periods — reuse smsService
+    pattern (Infobip), separate templates from guardian messages.
+  • Migrations: follow ensureAttendanceMigrations() in initDb.js.
+
+
+12. SAMPLE TSR PSEUDOCODE (server)
+----------------------------------
+
+  async function onStaffScan(staffId, roomBarcode, now) {
+    const room = await findRoomByBarcode(roomBarcode);
+    const period = resolvePeriod(now, room.academic_year_id);
+    if (!period) throw badRequest('Outside teaching hours');
+
+    const date = localDate(now);
+    const slots = await findTimetableSlots({
+      yearId: room.academic_year_id,
+      weekday: isoWeekday(date),
+      periodId: period.id,
+      roomId: room.id,
+    });
+
+    const scan = await insertScan({ staffId, roomId: room.id, periodId: period.id, ... });
+
+    for (const slot of slots) {
+      const status = classifyScan(slot, staffId, scan.recorded_at, period);
+      await upsertCompliance(date, slot.id, status, scan.id);
+    }
+
+    return { period, room, slotsUpdated: slots.length, status };
+  }
+
+  async function reconcileDay(date, yearId) {
+    const slots = await allTeachingSlotsForDate(date, yearId);
+    for (const slot of slots) {
+      if (await hasException(slot, date)) {
+        await upsertCompliance(date, slot.id, 'CANCELLED_EXCUSED');
+        continue;
+      }
+      const existing = await getCompliance(date, slot.id);
+      if (existing?.staff_scan_id) continue;
+
+      const events = await scansInWindow(slot, date);
+      if (events.length === 0) {
+        await upsertCompliance(date, slot.id,
+          slot.assigned_staff_id ? 'UNCOVERED' : 'VACANT_UNMONITORED');
+      } else {
+        await applyAuthoritativeEvent(slot, date, events);
+      }
+    }
+  }
+
+
+13. REPORTING VIEWS (minimum viable)
+------------------------------------
+
+  Daily matrix:
+    Period | Room | Class | Assigned teacher | Status | Actual teacher | Time
+
+  Staff ledger:
+    Teacher | Date | Period | Expected room | Scanned? | Minutes late
+
+  Uncovered list:
+    Sorted by period start — for same-day follow-up
+
+  Weekly summary:
+    % coverage, top rooms with gaps, teachers with repeated lateness
+
+
+14. CONFIGURATION DEFAULTS (school-friendly)
+--------------------------------------------
+
+  grace_before_min     5    (allow scan slightly before bell)
+  grace_late_min       5    (mark LATE after this)
+  grace_after_min      10   (still attribute scan to period if slightly over)
+  reconcile_cron       18:00 local — finalize day after last period
+  allow_scan_without_assignment  true  (substitute path)
+
+
+15. SUCCESS CRITERIA
+--------------------
+
+  • Every teaching period on the timetable for day D has exactly one
+    compliance row with a definitive status.
+  • Admin can list all UNCOVERED / VACANT slots for D in one screen.
+  • Assigned absent teachers are visible even when another teacher scanned.
+  • Teachers use the same QR habit as student ID scanning — class sticker
+    at door, one scan per period.
+
+
+16. DOCUMENT CONTROL
+--------------------
+
+  Owner: Engineering + School administration
+  Next review: After Phase 1 pilot in one department
+  File: staff.txt (repository root)
+
+================================================================================
+  END OF SPECIFICATION
+================================================================================

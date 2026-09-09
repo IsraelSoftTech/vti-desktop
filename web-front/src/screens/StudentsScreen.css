@@ -1,0 +1,9 @@
+.students-screen__panel {
+  min-height: 200px;
+}
+
+@media (min-width: 1024px) {
+  .segment-tabs {
+    margin-bottom: 20px;
+  }
+}

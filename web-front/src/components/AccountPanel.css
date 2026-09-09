@@ -1,0 +1,122 @@
+.account-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: calc(env(safe-area-inset-top, 0px) + 58px) 16px 16px;
+  background: var(--color-overlay);
+  border: none;
+  cursor: default;
+  animation: account-panel-in 0.18s ease;
+}
+
+@keyframes account-panel-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.account-panel__card {
+  width: 280px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 80px);
+  overflow: auto;
+  background: var(--color-surface);
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: 0 10px 20px var(--color-shadow);
+  border: none;
+  text-align: left;
+  cursor: default;
+  animation: account-panel-card-in 0.2s ease;
+}
+
+.account-panel__card--form {
+  width: 320px;
+}
+
+@keyframes account-panel-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.account-panel__name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+.account-panel__meta {
+  margin: 2px 0 14px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.account-panel__action {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.account-panel__action:hover,
+.account-panel__action--active {
+  background: var(--color-primary-200, var(--color-primary-soft));
+}
+
+.account-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0 12px;
+}
+
+.account-panel__error {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-danger);
+  line-height: 1.35;
+}
+
+.account-panel__logout {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.account-panel__logout:hover {
+  filter: brightness(0.98);
+}

@@ -1,0 +1,13 @@
+.student-avatar {
+  display: block;
+  object-fit: cover;
+  background: var(--color-primary-soft);
+  flex-shrink: 0;
+}
+
+.student-avatar--fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary);
+}

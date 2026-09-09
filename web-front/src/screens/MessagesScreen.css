@@ -1,0 +1,171 @@
+.messages-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 32px;
+}
+
+.messages-screen--chat {
+  padding-bottom: 0;
+  flex: 1;
+  min-height: 0;
+  gap: 10px;
+  height: 100%;
+}
+
+.messages-screen--chat .segment-tabs {
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+
+.messages-screen--chat .parent-chat {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.messages-screen .reports-hero {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: var(--color-primary-soft);
+  border-radius: 20px;
+  padding: 16px;
+  color: var(--color-primary);
+}
+
+.messages-screen .reports-hero__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--color-primary-dark);
+}
+
+.messages-screen .reports-hero__sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.messages-screen__expiry {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.settings-banner {
+  border-radius: 16px;
+  padding: 14px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  width: 100%;
+  box-sizing: border-box;
+  line-height: 1.45;
+}
+
+.settings-banner--warn {
+  background: var(--color-accent-peach-soft, #fff3eb);
+  color: #c45a20;
+}
+
+.settings-banner--info {
+  background: var(--color-primary-soft);
+  color: var(--color-text-muted);
+}
+
+.messages-screen__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.messages-screen__toolbar .ui-card__title {
+  margin: 0;
+}
+
+.messages-screen__filters {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+@media (min-width: 720px) {
+  .messages-screen__filters {
+    grid-template-columns: 1.4fr 0.8fr 0.8fr;
+  }
+}
+
+.messages-screen__empty {
+  margin: 8px 0 16px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.sms-to {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sms-to strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sms-to span {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.sms-body {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
+.sms-status {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+}
+
+.sms-status--ok {
+  color: var(--color-success);
+}
+
+.sms-status--sent {
+  color: var(--color-primary);
+}
+
+.sms-status--queued {
+  color: var(--color-text-muted);
+}
+
+.sms-status--err {
+  color: var(--color-danger);
+}
+
+.sms-status__err {
+  font-style: normal;
+  font-weight: 500;
+  text-transform: none;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

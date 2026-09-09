@@ -1,0 +1,208 @@
+.fee-reports {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-bottom: var(--space-6);
+}
+
+.fee-reports__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.fee-reports__toolbar .select-field {
+  flex: 1 1 220px;
+  min-width: 200px;
+  max-width: 360px;
+}
+
+.fee-reports__toolbar--tender .date-field,
+.fee-reports__toolbar--tender .select-field {
+  flex: 1 1 160px;
+  min-width: 150px;
+  max-width: 240px;
+}
+
+.fee-reports__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+}
+
+.fee-reports__actions .primary-btn {
+  flex: 1 1 140px;
+  min-width: 140px;
+}
+
+.fee-reports__panel {
+  background: #fff;
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.fee-reports__header {
+  background: #fff;
+  border-bottom: none;
+  padding: var(--space-4) var(--space-5);
+  text-align: center;
+}
+
+.fee-reports__school {
+  margin: 0;
+  font-size: clamp(1rem, 2.5vw, 1.2rem);
+  font-weight: var(--font-weight-extrabold);
+  color: #000;
+  line-height: var(--line-height-normal);
+}
+
+.fee-reports__title {
+  margin: var(--space-2) 0 0;
+  font-size: clamp(0.9rem, 2.2vw, 1.05rem);
+  font-weight: var(--font-weight-bold);
+  color: #000;
+  line-height: var(--line-height-normal);
+}
+
+.fee-reports__meta {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: #000;
+}
+
+.fee-reports__scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  background: #fff;
+}
+
+.fee-reports__table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+  color: #000;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+}
+
+.fee-reports__table thead {
+  background: #fff;
+}
+
+.fee-reports__table th {
+  padding: 12px 10px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-extrabold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #000;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.fee-reports__table th.col-name {
+  text-align: left;
+}
+
+.fee-reports__table th.col-num {
+  text-align: right;
+}
+
+.fee-reports__table td {
+  padding: 11px 10px;
+  border: 1px solid #e2e8f0;
+  color: #000;
+  background: #fff;
+  vertical-align: middle;
+}
+
+.fee-reports__table .col-sn {
+  text-align: center;
+  font-weight: var(--font-weight-semibold);
+  color: #000;
+  width: 48px;
+}
+
+.fee-reports__table .col-name {
+  text-align: left;
+  font-weight: var(--font-weight-bold);
+  min-width: 140px;
+}
+
+.fee-reports__table .col-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fee-reports__table .col-remark {
+  text-align: center;
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #000;
+}
+
+.fee-reports__table tfoot td {
+  background: #fff !important;
+  font-weight: var(--font-weight-extrabold);
+  color: #000;
+  border-top: 1px solid #cbd5e1;
+  font-size: var(--font-size-sm);
+}
+
+.fee-reports__empty {
+  padding: var(--space-10) var(--space-4);
+  text-align: center;
+  color: #000;
+  font-size: var(--font-size-base);
+}
+
+.fee-reports__loading {
+  padding: var(--space-8);
+  text-align: center;
+  color: #000;
+  font-weight: var(--font-weight-semibold);
+}
+
+.fee-reports__hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  line-height: var(--line-height-relaxed);
+}
+
+@media (min-width: 768px) {
+  .fee-reports__table {
+    font-size: var(--font-size-base);
+  }
+
+  .fee-reports__table th,
+  .fee-reports__table td {
+    padding: 12px 14px;
+  }
+}
+
+@media (max-width: 640px) {
+  .fee-reports__toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .fee-reports__toolbar .select-field {
+    max-width: none;
+  }
+
+  .fee-reports__actions .primary-btn {
+    width: 100%;
+  }
+}

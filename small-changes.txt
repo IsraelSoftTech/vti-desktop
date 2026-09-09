@@ -1,0 +1,214 @@
+SMALL CHANGES — IMPLEMENTATION ALGORITHM
+========================================
+Do not invent a parallel messaging system. Extend the existing school-server
+paths: Settings (web + mobile), smsMessages.js, parentNotify.js, GET /classes,
+FeePaymentTab, and LoginScreen.
+
+Accept both [checkout] and the typo [checkou] as the same token.
+
+
+1) WEB LOGIN PAGE = MOBILE LOGIN PAGE
+------------------------------------
+Goal: web login looks like mobile (card, fields, copy, colors). Keep the same
+login/register API. Staff intro/feature list on web is extra; remove it.
+
+Current:
+  mobile-front/src/screens/LoginScreen.tsx
+    centered card, MPASAT wordmark, Sign in / Register, username-or-phone,
+    parent create-account toggle, Privacy Policy + Request data deletion.
+  web-front/src/screens/LoginScreen.tsx
+    navy header, school feature list, two-column desktop shell.
+
+Algorithm:
+  A. Keep auth as-is (login + registerParent). Do not change API or tokens.
+  B. Restyle web LoginScreen to match mobile:
+       - page background = --color-background
+       - theme toggle top-right (on light, not on navy bar)
+       - one centered card (surface, radius ~22px)
+       - MPASAT wordmark, then title + subtitle (same copy as mobile)
+       - same fields, button titles, switch link, legal links
+  C. Delete the web-only intro column and navy branded header.
+  D. One layout for all widths (no 960px split). Max card width ~420px.
+  E. Check light + dark. Do not change staff/parent routing after login.
+
+
+2) ADMIN MESSAGE TEMPLATES (SMS + PARENT NOTIFICATIONS)
+-------------------------------------------------------
+Goal: admin types the text of each guardian message. Tokens are replaced at
+send time. Saved templates apply to both SMS and parent-app inbox.
+
+Existing senders (hardcoded today in mobile-back/smsMessages.js):
+  check_in              twice-a-day / normal: child arrived
+  check_out             twice-a-day / normal: child left
+  absence               missed check-in
+  missed_checkout       missed check-out
+  daily_miss_summary    once-a-day misser (end of day)
+  daily_non_misser      once-a-day present child (new if we add it)
+  pair_summary          end of pair for completers
+
+Tokens (replace case-insensitive; unknown tokens stay as typed):
+  [guardian-name]  student.guardian_name
+  [student-name]   student.full_name
+  [school-name]    attendance_settings.school_name
+  [date]           attendance date (dd/MM Cameroon)
+  [time]           event time (12-hour Douala)
+  [checkin]        that day's check-in time, or --:--
+  [checkout]       that day's check-out time, or --:--
+  [checkou]        alias of [checkout]
+  [minute-late]    minutes after school start (0 if on time / no check-in)
+
+Pair summary extra tokens (optional, document in the UI):
+  [date-1] [date-2] [checkin-1] [checkout-1] [checkin-2] [checkout-2]
+  If the admin only uses [date]/[checkin]/[checkout], fill them from day 2
+  (the day the pair closes), so a simple template still works.
+
+Storage (one row per academic year, JSON on attendance_settings):
+  ALTER: guardian_message_templates JSONB (or TEXT JSON on SQLite)
+  Shape:
+    {
+      "check_in": "...",
+      "check_out": "...",
+      "absence": "...",
+      "missed_checkout": "...",
+      "once_day_misser": "...",
+      "once_day_non_misser": "...",
+      "twice_day_misser_in": "...",   // optional; can reuse absence
+      "twice_day_misser_out": "...",  // optional; can reuse missed_checkout
+      "pair_summary": "Hello, [guardian-name], ..."
+    }
+  Empty string = keep current built-in smsMessages.js text.
+
+Algorithm:
+  A. Add DB column + default templates (the example in the request for
+     pair/daily; keep current short SMS as fallback).
+  B. New helper mobile-back/messageTemplates.js
+       renderTemplate(template, vars) -> string
+       strip unknown tokens only if you choose; default: leave them.
+       For SMS: after render, clip to 160 (reuse fitSms clip, but do NOT
+       wrap in "Greetings… MPASAT" if the admin already wrote a full sentence).
+       For app notification: use the full rendered text (no 160 clip).
+  C. In smsMessages.js / parentNotify.js / absentScheduler.js:
+       load templates for the year
+       pick key by kind
+       render
+       send
+  D. Settings → Notifications (web + mobile):
+       new subsection "Message format"
+       one textarea per kind above
+       chip list of tokens (tap inserts token at cursor)
+       live preview with sample names/times
+       Save uses existing PATCH /settings (extend payload)
+  E. Validate length hint for SMS (~160). Do not block save; warn only.
+  F. Same templates for SMS and parent inbox (channel is the existing
+     notifySmsEnabled / notifyAppEnabled toggles).
+
+
+3) ADMIN ANNOUNCEMENTS
+----------------------
+Goal: admin writes one message, picks who receives it, picks SMS and/or
+parent-account notification.
+
+No announcement feature exists. Parent inbox already has kind admin_chat
+for school chat; add a separate kind "announcement" so it is not mixed
+with chat threads.
+
+Algorithm:
+  A. Backend POST /admin/announcements  (admin only)
+     body: { message, classIds[], studentIds[], sendAllClasses, channels: { sms, app } }
+     Rules:
+       - message required, trim, max ~1000 (app) / warn at 160 (SMS)
+       - if sendAllClasses: all classes in active year
+       - else union of students in selected classes + extra studentIds
+       - at least one channel
+       - skip students with no phone when SMS-only; skip unlinked parents
+         when app-only; log both
+  B. Resolve recipients:
+       SELECT students in those classes (active year)
+       SMS: normalize contact, sendSms (reuse smsService.sendSms)
+            kind: announcement, log in existing SMS log
+       App: listParentsForStudent (parentNotify.js), insertInboxItem
+            kind: announcement, body = message, no token replace
+            (this is a broadcast, not an attendance event)
+  C. Deduplicate parent user ids (one inbox row per parent even if two
+     children are selected). Optionally mention children in the body
+     only if admin typed names; do not auto-expand.
+  D. Return { smsSent, smsSkipped, appSent, appSkipped }.
+  E. UI: new "Announcement" tab on Messages screen (admin only; hide for
+     accountant).
+       textarea
+       "All classes" checkbox
+       class multi-select (use the class order from §4)
+       optional student search/multi-select (narrowed by selected classes)
+       checkboxes: SMS / Parent notification
+       Confirm modal showing count of students / parents
+       Send → toast with counts
+  F. Parent app already lists notifications; add announcement icon/color
+     in ParentNotificationsScreen (web + mobile). Opening it stays in inbox
+     (do not jump to chat).
+
+
+4) ACCOUNTANT FEE PAYMENT — CLASS ORDER
+---------------------------------------
+Goal: class dropdown is school order, not A–Z.
+
+Today GET /classes uses ORDER BY c.name ASC, so "Form Five" appears before
+"Form One". FeePaymentTab maps that list as-is.
+
+Wanted order:
+  all Form One   (Grammar, Technical, Commercial, …)
+  all Form Two
+  all Form Three
+  all Form Four
+  all Form Five
+  all Lower Sixth
+  all Upper Sixth
+  anything else last (alphabetical inside the leftover group)
+
+Algorithm:
+  A. One shared sorter (mobile-back/classOrder.js AND mirrored in
+     web-front/src/utils/classOrder.ts + mobile-front). Prefer sorting in
+     the API so every client (web accountant, mobile, ID cards, reports)
+     stays consistent.
+
+  B. Rank from class name (case-insensitive):
+
+       function formRank(name):
+         n = name.lower()
+         if n contains "upper sixth" or "upper 6": return 70
+         if n contains "lower sixth" or "lower 6": return 60
+         if match form/class "one"   or \b1\b    : return 10
+         if match form/class "two"   or \b2\b    : return 20
+         if match form/class "three" or \b3\b    : return 30
+         if match form/class "four"  or \b4\b    : return 40
+         if match form/class "five"  or \b5\b    : return 50
+         return 90
+
+       function streamRank(name):
+         n = name.lower()
+         if "grammar":     return 1
+         if "technical":   return 2
+         if "commercial":  return 3
+         if "science":     return 4
+         if "arts":        return 5
+         return 9
+
+       sort key = (formRank, streamRank, name.toLowerCase())
+
+  C. Apply in GET /classes (routes.js) after the SQL fetch.
+     Keep SQL as-is or ORDER BY id; JS sort is the source of truth.
+  D. No schema change. Works for existing names like
+     "Form One Grammar", "Form 1 Technical", "Lower Sixth Science".
+  E. FeePaymentTab needs no extra UI work if it consumes GET /classes.
+     Recheck any local class lists that do not use that endpoint.
+
+
+IMPLEMENTATION ORDER
+--------------------
+  1. Class sort (smallest, no UI, accountant sees it immediately).
+  2. Web login restyle (front-end only).
+  3. Message templates (DB + render helper + Settings form + wire senders).
+  4. Announcements (new endpoint + Messages tab + parent inbox kind).
+
+Check after each step:
+  login (staff + parent register), settings save, one real SMS/inbox
+  render with tokens, announcement to one class, fee class dropdown order.

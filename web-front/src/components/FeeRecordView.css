@@ -1,0 +1,184 @@
+.fee-record-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.fee-record-view__banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+}
+
+.fee-record-view__banner-text {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-extrabold);
+}
+
+.fee-record-view__summary {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.fee-record-view__summary-box {
+  flex: 1;
+  min-width: 88px;
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  text-align: center;
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-xs);
+}
+
+.fee-record-view__summary-val {
+  display: block;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-extrabold);
+  color: var(--color-primary-dark);
+  letter-spacing: -0.02em;
+}
+
+.fee-record-view__summary-val--paid {
+  color: var(--color-accent-teal);
+}
+
+.fee-record-view__summary-val--discount {
+  color: var(--color-accent-peach);
+}
+
+.fee-record-view__summary-val--owing {
+  color: var(--color-danger);
+}
+
+.fee-record-view__summary-label {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fee-record-view__section {
+  margin: 0;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-extrabold);
+  color: var(--color-primary-dark);
+}
+
+.fee-record-view__fee-name {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+}
+
+.fee-record-view__fee-status {
+  display: block;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  margin-top: 2px;
+}
+
+.fee-record-view__num {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+}
+
+.fee-record-view__num--paid {
+  color: var(--color-accent-teal);
+}
+
+.fee-record-view__num--discount {
+  color: var(--color-accent-peach);
+}
+
+.fee-record-view__num--owing {
+  color: var(--color-danger);
+}
+
+.fee-record-view__date,
+.fee-record-view__note,
+.fee-record-view__method {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.fee-record-view__method {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+  font-style: normal;
+}
+
+.fee-record-view__method-chips {
+  display: flex;
+  gap: 4px;
+}
+
+.fee-record-view__method-chip {
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.fee-record-view__method-chip--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-dark);
+}
+
+.fee-record-view__note {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.fee-record-view__hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-warning);
+  font-weight: var(--font-weight-semibold);
+  background: var(--color-warning-soft);
+  border: 1px solid rgba(249, 115, 22, 0.2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+.fee-record-view__empty {
+  margin: 0;
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: var(--space-4);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.fee-record-view__actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.fee-record-view__inline-input {
+  width: 100%;
+  min-width: 64px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  background: var(--color-surface);
+}

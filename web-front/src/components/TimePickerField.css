@@ -1,0 +1,98 @@
+.time-field__trigger {
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+
+.time-field__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.time-field__sheet {
+  width: 100%;
+  max-width: 480px;
+  background: var(--color-surface);
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+  box-shadow: 0 -8px 32px var(--color-shadow);
+}
+
+.time-field__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--color-border-strong);
+}
+
+.time-field__toolbar-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.time-field__toolbar-btn {
+  border: none;
+  background: none;
+  font-size: 16px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.time-field__toolbar-btn--done {
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.time-field__pickers {
+  display: flex;
+  gap: 10px;
+  padding: 20px;
+}
+
+.time-field__select {
+  flex: 1;
+  box-sizing: border-box;
+  appearance: none;
+  background: var(--color-surface)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%231E3A8A' d='M1 1l5 5 5-5'/%3E%3C/svg%3E")
+    no-repeat right 14px center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 14px;
+  padding: 13px 36px 13px 14px;
+  font-size: 17px;
+  font-family: inherit;
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: center;
+}
+
+.time-field__select--period {
+  flex: 0.85;
+}
+
+.time-field__select:focus {
+  outline: 2px solid var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+
+@media (min-width: 520px) {
+  .time-field__backdrop {
+    align-items: center;
+    padding: 24px;
+  }
+
+  .time-field__sheet {
+    border-radius: 20px;
+  }
+}

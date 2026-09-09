@@ -1,0 +1,118 @@
+{
+  "expo": {
+    "name": "MPASAT",
+    "slug": "attendance-mobile",
+    "version": "1.0.6",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B1220"
+    },
+    "ios": {
+      "bundleIdentifier": "com.vtispace.mpasat",
+      "buildNumber": "4",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "MPASAT uses the camera to scan student ID card QR codes and send photos in chat.",
+        "NSPhotoLibraryUsageDescription": "MPASAT accesses photos for student ID cards and parent chat.",
+        "NSPhotoLibraryAddUsageDescription": "MPASAT saves chat photos to your library when you tap Save.",
+        "NSMicrophoneUsageDescription": "MPASAT records short voice notes to send to the school.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.vtispace.mpasat",
+      "versionCode": 4,
+      "googleServicesFile": "./google-services.json",
+      "softwareKeyboardLayoutMode": "resize",
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "backgroundColor": "#0B1220",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "android.permission.WAKE_LOCK"
+      ],
+      "blockedPermissions": [
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "MPASAT uses the camera to scan student ID card QR codes and send photos in chat.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow MPASAT to access photos for student ID cards and parent chat.",
+          "cameraPermission": "Allow MPASAT to take photos for student ID cards and parent chat."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow MPASAT to record voice notes for the school."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow MPASAT to save chat photos to your library.",
+          "savePhotosPermission": "Allow MPASAT to save chat photos to your library.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "useLegacyPackaging": true
+          }
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "parent-alerts",
+          "enableBackgroundRemoteNotifications": true,
+          "color": "#0B1220",
+          "sounds": []
+        }
+      ],
+      "./plugins/withSafeAndroidNotifications"
+    ],
+    "extra": {
+      "privacyPolicyUrl": "https://api.vtispace.com/privacy",
+      "accountDeletionUrl": "https://api.vtispace.com/delete-account",
+      "eas": {
+        "projectId": "26f69ee4-765d-4409-8e76-7ae0a3c33976"
+      }
+    }
+  }
+}

@@ -1,0 +1,458 @@
+.fee-payment-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.fee-payment-menu {
+  gap: var(--space-5);
+}
+
+.fee-payment-menu-heading {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-extrabold);
+  color: var(--color-primary-dark);
+  text-align: center;
+  line-height: var(--line-height-normal);
+  letter-spacing: -0.02em;
+}
+
+.fee-payment-action-row {
+  display: flex;
+  gap: 14px;
+}
+
+.fee-payment-action-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 16px;
+  border-radius: 20px;
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--color-primary-dark);
+  transition: transform 0.12s, opacity 0.12s;
+}
+
+.fee-payment-action-btn:hover {
+  opacity: 0.92;
+}
+
+.fee-payment-action-btn:active {
+  transform: scale(0.98);
+}
+
+.fee-payment-action-btn--scan {
+  background: var(--color-primary-soft);
+  border-color: var(--color-border);
+}
+
+.fee-payment-action-btn--pay {
+  background: var(--color-accent-teal-soft);
+  border-color: rgba(46, 196, 182, 0.27);
+}
+
+.fee-payment-scanned {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--color-primary-soft);
+  border-radius: 18px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.fee-payment-scanned-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: var(--color-white);
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.fee-payment-scanned-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.fee-payment-scanned-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.fee-payment-scanned-name {
+  margin-top: 2px;
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--color-text);
+}
+
+.fee-payment-scanned-hint {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.fee-payment-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.fee-payment-flow-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--color-primary-dark);
+}
+
+.fee-payment-flow-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.fee-payment-change-class {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.fee-payment-student-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fee-payment-student-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--color-primary-soft);
+  border-radius: 16px;
+  padding: 12px 14px;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.fee-payment-student-row:hover {
+  opacity: 0.95;
+}
+
+.fee-payment-student-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+.fee-payment-student-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.fee-payment-loading,
+.fee-payment-empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: 16px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.fee-payment-error {
+  text-align: center;
+  color: var(--color-danger);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 8px;
+}
+
+.fee-payment-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--color-primary-dark);
+}
+
+.fee-payment-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.fee-payment-section-label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--color-primary-dark);
+}
+
+.fee-payment-chip-row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 4px 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.fee-payment-chip {
+  flex-shrink: 0;
+  width: 148px;
+  background: var(--color-primary-soft);
+  border-radius: 18px;
+  padding: 14px;
+  border: 1.5px solid;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.fee-payment-chip:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.fee-payment-chip-name {
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.fee-payment-chip-bal {
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--color-text);
+}
+
+.fee-payment-chip-meta {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.fee-payment-pay-tag {
+  margin-top: 6px;
+  align-self: flex-start;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.fee-payment-paid-tag {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--color-accent-teal);
+}
+
+.fee-payment-warn {
+  display: flex;
+  gap: 10px;
+  background: #fff4ed;
+  border-radius: 14px;
+  padding: 14px;
+  align-items: flex-start;
+  font-size: 13px;
+  color: var(--color-text);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.fee-payment-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: var(--color-overlay);
+  padding: 0;
+}
+
+.fee-payment-modal-sheet {
+  width: 100%;
+  max-width: 520px;
+  max-height: 88vh;
+  overflow: auto;
+  background: var(--color-surface);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fee-payment-modal-handle {
+  align-self: center;
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-border);
+  margin-bottom: 4px;
+}
+
+.fee-payment-modal-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--color-primary-dark);
+}
+
+.fee-payment-modal-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.fee-payment-tender-row {
+  display: flex;
+  gap: 10px;
+}
+
+.fee-payment-tender-chip {
+  flex: 1;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-primary-soft);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--color-text);
+  -webkit-text-fill-color: var(--color-text);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.fee-payment-tender-chip--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-dark);
+}
+
+.fee-payment-modal-chip {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--color-primary-soft);
+  border: 1px solid var(--color-border);
+  min-width: 110px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.fee-payment-modal-chip--active {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+
+.fee-payment-modal-chip-text {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+.fee-payment-modal-chip-text--active {
+  color: var(--color-primary-dark);
+}
+
+.fee-payment-modal-chip-bal {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.fee-payment-selected-fee {
+  background: var(--color-primary-soft);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.fee-payment-selected-fee-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.fee-payment-selected-fee-name {
+  margin-top: 4px;
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--color-primary-dark);
+}
+
+.fee-payment-balance-box {
+  display: flex;
+  gap: 8px;
+  background: var(--color-primary-soft);
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.fee-payment-balance-item {
+  flex: 1;
+  text-align: center;
+}
+
+.fee-payment-balance-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.fee-payment-balance-val {
+  display: block;
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 900;
+  color: var(--color-primary);
+}
+
+.fee-payment-balance-val--paid {
+  color: var(--color-accent-teal);
+}
+
+.fee-payment-balance-val--owing {
+  color: var(--color-danger);
+}

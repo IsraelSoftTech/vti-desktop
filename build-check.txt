@@ -1,0 +1,268 @@
+MPASAT ANDROID INSTALL + LAUNCH CHECK
+=====================================
+Package: com.vtispace.mpasat
+Project: mobile-front
+Goal: find why an EAS APK will not INSTALL, or installs but will not OPEN.
+
+Do not mix the two failures:
+  A) "App not installed"  = PackageManager rejected the APK. App never lands on the phone.
+  B) Icon appears, tap closes = APK installed. Native/JS crash on cold start.
+
+Run A first. Only run B after a successful install.
+
+
+ALGORITHM
+---------
+
+STEP 0 — Identify the exact binary
+  1. Record the EAS build URL, profile (preview APK vs production AAB), version, versionCode.
+  2. Confirm the phone file is .apk (not .aab). An .aab cannot be sideloaded.
+  3. Confirm file size is tens of MB (this app ~50–110 MB). A tiny file is a bad download.
+  4. If several APKs were tried, delete the old ones. Only test one file.
+
+STEP 1 — Inspect the APK itself (required; source grep is not enough)
+  Input: the .apk that failed on phones.
+  1. Unzip / parse AndroidManifest.xml.
+  2. Read application android:extractNativeLibs.
+  3. List lib/**/*.so:
+       - compression: STORED (0) vs DEFLATED (8)
+       - ABIs present: armeabi-v7a, arm64-v8a (x86 optional)
+       - ZIP data alignment of each .so (offset modulo 4096 and 16384)
+  4. Decision table:
+       extractNativeLibs=false AND .so files STORED but NOT 4KB/16KB aligned
+         -> INSTALL_FAILED_INVALID_APK on almost every phone.
+            This was versionCode 11 (103 MB preview). Sideload will never work.
+       extractNativeLibs=true AND .so files DEFLATED
+         -> packaging OK for sideload. VersionCode 13 (~51 MB) is this shape.
+            If phones still fail, the cause is NOT that zip-alignment bug.
+       Missing armeabi-v7a
+         -> 32-bit phones fail install. 64-bit phones still install.
+  5. Dump providers. Every <provider> MUST have android:authorities.
+     A provider with only android:name (tools:node=remove stub) -> install reject.
+  6. Dump package name, versionCode, minSdk, targetSdk, permissions.
+  7. Verify signing (apksigner verify --verbose). Invalid cert -> install reject.
+
+STEP 2 — Scan mobile-front source (native config that becomes the APK)
+  Work directory: mobile-front
+  Ignore: node_modules, .expo, android/ios generated folders unless prebuild is committed.
+
+  2.1 app.json / app.config.js
+      - expo.android.package must stay com.vtispace.mpasat
+      - plugins[]: every config plugin. These rewrite AndroidManifest and Gradle.
+      - android.blockedPermissions: too aggressive a block can break a library
+        (example: blocking a permission a provider requires).
+      - android.permissions vs plugins (camera, av, media-library, image-picker).
+      - extra.eas.projectId present.
+      - googleServicesFile: MUST be absent until a real google-services.json exists.
+        If present without the file, cold start can crash after install.
+      - newArchEnabled: note it; does not by itself block install.
+
+  2.2 eas.json
+      - preview.android.buildType must be "apk" for phone sideload.
+      - production.android.buildType "app-bundle" is Play-only.
+      - EXPO_PUBLIC_API_URL for preview/production = https://api.vtispace.com
+
+  2.3 package.json
+      - expo.autolinking.exclude / android.exclude:
+        expo-notifications MUST stay excluded until Firebase+APNs exist.
+      - expo-notifications still in dependencies is OK if excluded from autolinking.
+      - expo-build-properties must set android.useLegacyPackaging = true
+        (this is what sets extractNativeLibs=true for sideload APKs).
+
+  2.4 plugins/*.js
+      Walk every withAndroidManifest / withAppBuildGradle plugin.
+      FORBIDDEN: adding a <provider|service|receiver> with tools:node="remove"
+        when the component does not already exist (no authorities -> install fail).
+      REQUIRED: if stripping Firebase, DELETE existing entries only; do not insert stubs.
+      Current file: plugins/withSafeAndroidNotifications.js
+        Must filter-out matching android:name; must NOT push stub components.
+
+  2.5 Native crash sources (after install)
+      Grep mobile-front (exclude node_modules) for:
+        google-services.json
+        FirebaseInitProvider
+        ExpoFirebaseMessagingService
+        expo-notifications
+        require("expo-notifications")
+        Notifications.getExpoPushTokenAsync
+        registerForPushNotifications
+      Rules:
+        - No google-services.json in the project until FCM is real.
+        - JS must lazy-require expo-notifications inside try/catch, or not call it
+          at startup (ParentShell must not load it on launch).
+        - registerParentPushToken must not prompt until FCM/APNs exist.
+
+  2.6 JS bundle breakers (EAS "Bundle JavaScript" phase)
+      npx expo export:embed --eager --platform android --dev false
+      Grep *.ts *.tsx for illegal parameter lists (commas not semicolons), e.g.
+        function foo(x: T; y: U)  is invalid and fails the cloud bundle.
+      Confirm required assets exist (icon, splash, assets/sounds/*.wav).
+
+  2.7 Index / entry
+      package.json "main" -> index.ts -> App.tsx
+      ErrorBoundary must wrap the tree so a render throw is not a silent close.
+
+STEP 3 — Match source to the APK (catch "config not in this binary")
+  1. If app.json has useLegacyPackaging true, the APK under test MUST show
+     extractNativeLibs=true. If it still shows false, that APK is an OLD build.
+  2. Compare versionCode in the APK vs EAS page vs the file on the phone.
+  3. Never test versionCode 11 (broken alignment) after versionCode 13 exists.
+
+STEP 4 — Phone procedure (only after STEP 1 says the APK is installable)
+  1. Uninstall every copy of com.vtispace.mpasat (drawer icon, Settings -> Apps,
+     dual space / second space). Search the package name, not only "MPASAT".
+  2. Install the APK with Files (allow unknown apps for Files), not an old
+     Downloads notification pointing at a previous file.
+  3. If it still fails, connect USB and capture the real error:
+       adb install -r path\to\app.apk
+     Map the code:
+       INSTALL_FAILED_INVALID_APK          -> packaging/alignment (STEP 1)
+       INSTALL_FAILED_UPDATE_INCOMPATIBLE  -> leftover app, different signature
+       INSTALL_FAILED_NO_MATCHING_ABIS     -> missing ABI (STEP 1.4)
+       INSTALL_PARSE_FAILED_MANIFEST_MALFORMED -> provider/manifest (STEP 1.5, 2.4)
+       INSTALL_FAILED_INSUFFICIENT_STORAGE -> free space
+       INSTALL_FAILED_VERIFICATION_FAILURE -> Play Protect; retry with Protect off
+  4. If adb install succeeds, the file was fine; the on-phone installer/UI was
+     the problem (wrong file, Play Protect, unknown-sources app).
+
+STEP 5 — If it installs but does not stay open
+  1. adb logcat --pid=$(adb shell pidof com.vtispace.mpasat)
+     or: adb logcat | findstr /i "AndroidRuntime Firebase Expo mpasa"
+  2. Typical this project: FirebaseInitProvider / ExpoFirebaseMessagingService
+     without google-services.json. Fix = keep notifications unlinked + no FCM
+     stubs (STEP 2.4, 2.5). Rebuild. Do not "fix" by adding a fake google-services.json.
+  3. Confirm production JS talks to https://api.vtispace.com only (__DEV__ LAN
+     URLs must not ship). Network errors must not mention port 4000.
+
+STEP 6 — Rebuild rule
+  Any change in app.json plugins, eas.json, package.json autolinking, or
+  plugins/*.js requires a NEW EAS binary. OTA/JS reload cannot fix install.
+    Sideload test:  npx eas build -p android --profile preview
+    Play Store:     npx eas build -p android --profile production
+  After a packaging fix, throw away older APKs. Phones cache Downloads.
+
+
+KNOWN RESULTS FOR THIS APP (20 Aug 2026)
+----------------------------------------
+versionCode 11 preview APK (~103 MB)
+  extractNativeLibs=false, 92 .so STORED, 0 of 92 aligned to 4KB.
+  Result: App not installed on every phone. Expected. Do not retest this file.
+
+versionCode 13 preview APK (~51 MB)
+  extractNativeLibs=true, 92 .so DEFLATED.
+  Packaging bug from v11 is gone. If install still fails, run STEP 4 adb install
+  and treat it as leftover package / Play Protect / wrong file, not alignment.
+
+Source checks already applied
+  - expo-build-properties android.useLegacyPackaging = true
+  - expo-notifications excluded from autolinking
+  - withSafeAndroidNotifications deletes FCM entries; does not insert stubs
+  - Parent push registration is a no-op until FCM/APNs exist
+
+
+QUICK COMMANDS
+--------------
+# Bundle (catch JS syntax before EAS)
+cd mobile-front
+npx expo export:embed --eager --platform android --dev false
+
+# Source scan
+rg -n "google-services|FirebaseInitProvider|expo-notifications|blockedPermissions|useLegacyPackaging|tools:node" --glob "!node_modules/**"
+
+# After you have the APK locally
+python -c "import zipfile; z=zipfile.ZipFile(r'PATH.apk');
+print([(i.compress_type, i.filename) for i in z.infolist() if i.filename.endswith('.so')][:5])"
+
+
+SCAN RESULTS — 20 Aug 2026
+==========================
+Binary under test: preview APK versionCode 13, versionName 1.0.6
+EAS artifact: https://expo.dev/artifacts/eas/Ph-XstHMP5XWOUOR0wyCc1x2bsWPg32PAbS5qDQb5ck.apk
+Local copy: %TEMP%\mpasat-v13.apk
+Size: 53667479 bytes (~51 MB). It is an .apk, not an .aab.
+
+STEP 0  PASS
+  File is a full-size APK. Do not test the old ~103 MB versionCode 11 download.
+
+STEP 1  PASS (install packaging)
+  package              com.vtispace.mpasat
+  minSdk 24            targetSdk 36
+  extractNativeLibs    true
+  .so files            92 DEFLATED, 0 STORED (legacy packaging landed)
+  ABIs                 armeabi-v7a, arm64-v8a, x86, x86_64
+  arm64 ELF PT_LOAD    16KB aligned (libreactnative, libhermes, libfbjni, libc++_shared)
+  providers            7, every one has android:authorities
+  BAD_NO_AUTHORITIES   none
+  FirebaseInitProvider absent
+  ExpoFirebase         absent
+  expo-notifications   not in native APK
+  google-services.json absent from APK
+  POST_NOTIFICATIONS   absent (blocked as intended)
+  signature            APK Signature Scheme v2 present (v1/v3 unused). Fine for minSdk 24.
+  SYSTEM_ALERT_WINDOW  present (Expo default, not declared in app.json). Not a proven
+                       all-phone install reject; leftover overlay permission only.
+
+  Decision: this binary is NOT the v11 zip-alignment failure.
+  If a phone still shows "App not installed", it is leftover package / Play Protect /
+  wrong file / OEM installer — capture adb install (STEP 4). adb was not on PATH here.
+
+STEP 2  PASS (source)
+  2.1 app.json
+      package com.vtispace.mpasat. No googleServicesFile. projectId present.
+      plugins: expo-font, expo-secure-store, expo-camera, expo-image-picker,
+               expo-av, expo-media-library, expo-build-properties
+               (useLegacyPackaging true), ./plugins/withSafeAndroidNotifications
+      newArchEnabled true (does not block install).
+      android.versionCode in file is 4; EAS remote autoIncrement produced 13. Expected.
+  2.2 eas.json
+      preview buildType apk. production app-bundle.
+      EXPO_PUBLIC_API_URL https://api.vtispace.com on preview and production.
+  2.3 package.json
+      expo-notifications excluded from autolinking (root + android).
+      Still listed in dependencies (JS-only until FCM exists). OK.
+  2.4 plugins/withSafeAndroidNotifications.js
+      Deletes matching components only. Does not insert tools:node=remove stubs.
+  2.5 launch / push
+      No google-services.json in mobile-front.
+      ParentShell does not import expo-notifications or parentPush.
+      registerParentPushToken() returns null (no permission prompt).
+      getNotifications() is lazy require + try/catch; only ParentSettings
+      imports previewParentSound (after login, not at cold start).
+  2.6 JS bundle
+      npx expo export:embed --eager --platform android --dev false
+      -> Android Bundled 3414ms, 1836 modules, 44 assets. PASS.
+      No illegal "param: T; param: U" function signatures.
+      Assets present: icon, splash, android-icon-foreground, 6 wav sounds.
+  2.7 entry
+      main index.ts -> App.tsx. ErrorBoundary wraps the tree.
+
+STEP 3  PASS (source matches this APK)
+  app.json useLegacyPackaging true AND APK extractNativeLibs true.
+  Autolink exclude matches: no notifications native in the APK.
+  Never retest versionCode 11.
+
+STEP 4  NOT RUN (no adb / no USB phone on this machine)
+  Required on the next failing phone:
+    Uninstall com.vtispace.mpasat completely (including dual space).
+    Confirm the file is ~51 MB, not ~103 MB.
+    adb install -r mpasat-v13.apk
+    Read the INSTALL_* code. Do not trust the toast alone.
+
+STEP 5  SOURCE LOOKS SAFE (cannot prove on-device without logcat)
+  Cold start does not load Firebase or expo-notifications native.
+  Production API: EXPO_PUBLIC_API_URL or https://api.vtispace.com.
+  LAN :4000 URLs only when __DEV__. Network errors do not mention port 4000.
+
+STEP 6  no source change required for packaging
+  Sideload this v13 APK. Play Store still needs a production AAB rebuilt
+  with the same useLegacyPackaging setting (AAB 1.0.6 versionCode 10 was
+  built before this packaging fix).
+
+
+VERDICT
+-------
+Code + v13 APK: install should succeed. The bug that blocked every phone
+was versionCode 11 (uncompressed unaligned .so). That is not this file.
+
+If v13 still fails on a phone, the next fact to collect is the adb install
+error code (STEP 4). Source grep will not find it.

@@ -1,0 +1,62 @@
+.logs-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 32px;
+}
+
+.logs-toolbar {
+  align-items: flex-start;
+}
+
+.logs-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.logs-filters {
+  margin-bottom: 16px;
+}
+
+.logs-who,
+.logs-action {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.logs-who strong,
+.logs-action strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.logs-who span,
+.logs-action span {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.logs-clear-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 13px 20px;
+  min-height: 50px;
+  background: var(--color-danger);
+  color: var(--color-white);
+  font-size: 14px;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.logs-clear-btn:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.logs-clear-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

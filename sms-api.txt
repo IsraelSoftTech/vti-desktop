@@ -1,0 +1,245 @@
+SMS-API INTERFACES
+
+Table of Contents
+SMS-API Interfaces ........................................................................................................................... 1
+1. Objectives ...................................................................................................................................... 3
+2. API description for SMS API (RESTFul) .................................................................................. 4
+2.1 Send SMS Operation .......................................................................................................... 4
+2.1.1 Request ........................................................................................................................... 4
+2.1.2 Response ........................................................................................................................ 5
+2.2 Get SMS account balance ................................................................................................. 6
+2.2.1 Request ........................................................................................................................... 6
+2.2.2 Response ........................................................................................................................ 7
+2.3 Send SMS DR Notification ............................................................................................... 7
+2.3.1 Request ........................................................................................................................... 7
+2.3.2 Response ........................................................................................................................ 8
+
+
+1. Objectives
+
+This document is intended to specify the interface between the SMS Wrapper
+and a partner platform for SMS API RESTFul interface only. It describes how
+partners / developers have to send requests to the SMS Wrapper and how the
+SMS Wrapper will respond.
+
+
+2. API description for SMS API (RESTFul)
+
+The SMS API service includes the following operations:
+• Send SMS
+• Get SMS Account Balance
+• Send SMS DR Notification
+
+
+2.1 Send SMS Operation
+
+HTTP Method : POST/GET
+
+2.1.1 Request
+
+PARAMETER    TYPE      REQUIRED     DESCRIPTION
+user          String    Mandatory    It is for login
+password      String    Mandatory    It is for password
+senderid      String    Mandatory    The sender name
+sms           String    Mandatory    Message to send
+mobiles       String    Mandatory    Comma separated mobiles
+                                     numbers (237 is optionnal)
+                                     Eg :
+                                     237XXXXXXXXX,XXXXXXXXX,…
+
+POST https://smsvas.com/bulk/public/index.php/api/v1/sendsms HTTP/1.1
+Accept: application/json
+Content-Type: application/json
+
+{
+  "user": "user",
+  "password": "password",
+  "senderid": "SENDER",
+  "sms": "message",
+  "mobiles": "237XXXXXXXXX,XXXXXXXXX"
+}
+
+GET HTTP/1.1
+https://smsvas.com/bulk/public/index.php/api/v1/sendsms?user=user&password=password&senderid=sender&sms=message&mobiles=XXXXXXXXX,XXXXXXXXX,XXXXXXXXX
+
+
+2.1.2 Response
+
+PARAMETER            TYPE       VALUE/FORMAT              DESCRIPTION
+responsecode         Integer    1 if success, 0 if error  The code of the response
+responsedescription  String     success or error          The description of the response
+responsemessage      String     (**)                      The message of the response
+status               String     success or error          The status of the response
+messageid            String     XXXXXXXXX                 The id of the message
+smsclientid          String     XXXXXXXXX                 The id of the request
+Errorcode            Integer    (*)                       Code of the error
+Errordescription     String     (*)                       Description of the code
+mobileno             String     +237XXXXXXXXX             The phone number
+
+Example (successful response):
+
+{
+  "responsecode": 1,
+  "responsedescription": "success",
+  "responsemessage": "success",
+  "sms": [
+    {
+      "messageid": "c2b849db106f0c2e07dd9b881e6bdfe7",
+      "smsclientid": "0c851d9f-6c63-49fb-af16-6887c37a81de",
+      "mobileno": "+237678018812",
+      "status": "success",
+      "errorcode": "",
+      "errordescription": ""
+    },
+    {
+      "messageid": "e12dd358cff3961752f8c1180cc209ff",
+      "smsclientid": "1cc6c9d3-a82b-4ece-85ae-aff58818488c",
+      "mobileno": "+237693879492",
+      "status": "success",
+      "errorcode": "",
+      "errordescription": ""
+    }
+  ]
+}
+
+(*) Error Code and Description
+
+ERROR CODE    DESCRIPTION
+-10019        Inactive User
+-10003        Invalid Mobile Number
+-10026        Client SMS ID Max Limit Exceed
+-10008        Balance not enough
+
+(**) Response message error values
+Username and password require
+ERRORS
+Mobile number require
+Message require
+Senderid require
+Balance not enough
+Invalid senderid
+Invalid schedule date
+
+
+2.2 Get SMS account balance
+
+HTTP Method : POST/GET
+
+2.2.1 Request
+
+PARAMETER    TYPE      REQUIRED     DESCRIPTION
+user         String    Mandatory    It is for login
+password     String    Mandatory    It is for password
+
+POST https://smsvas.com/bulk/public/index.php/api/v1/smscredit HTTP/1.1
+Accept: application/json
+Content-Type: application/json
+
+{
+  "user": "user",
+  "password": "password"
+}
+
+GET HTTP/1.1
+https://smsvas.com/bulk/public/index.php/api/v1/smscredit?user=user&password=password
+
+2.2.2 Response
+
+PARAMETER        TYPE       VALUE/FORMAT    DESCRIPTION
+accountexpdate   Date       dd/MM/yyyy      The account expiration Date
+balanceexpdate   Date       dd/MM/yyyy      The balance expiration Date
+credit           Integer    XXXX            The available SMS credit remaining
+
+Example (successful response):
+
+{
+  "accountexpdate": "26/03/2020",
+  "balanceexpdate": "07/09/2019",
+  "credit": 6124
+}
+
+
+2.3 Send SMS DR Notification
+
+HTTP Method : POST
+
+2.3.1 Request
+
+PARAMETER            TYPE        VALUE / FORMAT         DESCRIPTION
+reponsecode          Integer     (*)                    The code of the response
+Reponsedescription   String      success or error       The description of the response
+Status               String      (*)                    The delivery status of the message
+messageid            String      XXXXXXXXX              The id of the message
+submittime           DateTime    yyyy-MM-dd hh:mm:ss    The submit time of the message
+senttime             DateTime    yyyy-MM-dd hh:mm:ss    The sent time of the message
+deliverytime         DateTime    yyyy-MM-dd hh:mm:ss    The delivery time of the message
+mobileno             String      +237XXXXXXXXX          The phone number
+
+(*) Error Code and Description/status
+
+ERROR CODE    DESCRIPTION or STATUS
+0             UNDELIV – The Message is not delivered
+1             DELIVRD – The Message is delivered
+
+Example:
+
+POST [Partner URL] HTTP/1.1
+Accept: application/json
+Content-Type: application/json
+
+{
+  "dlrlist": [
+    {
+      "reponsecode": 1,
+      "reponsedescription": "success",
+      "messageid": "e12dd358cff3961752f8c1180cc209ff",
+      "mobileno": "+237678018812",
+      "status": "DELIVRD",
+      "submittime": "2019-05-11 13:53:13",
+      "senttime": "2019-05-11 13:53:14",
+      "deliverytime": "2019-05-11 13:53:14"
+    },
+    {
+      "reponsecode": 1,
+      "reponsedescription": "success",
+      "messageid": "e12dd358cff3961752f8c1180cc209ff",
+      "mobileno": "+237678018812",
+      "status": "DELIVRD",
+      "submittime": "2019-05-11 13:53:13",
+      "senttime": "2019-05-11 13:53:14",
+      "deliverytime": "2019-05-11 13:53:14"
+    }
+  ]
+}
+
+
+2.3.2 Response
+
+The partner or the developer should change status to 1 if success or to 0 if
+failure.
+Below exampe response is expected from the partner.
+
+{
+  "dlrlist": [
+    {
+      "reponsecode": 1,
+      "reponsedescription": "success",
+      "messageid": "e12dd358cff3961752f8c1180cc209ff",
+      "mobileno": "+237678018812",
+      "status": 1,
+      "submittime": "2019-05-11 13:53:13",
+      "senttime": "2019-05-11 13:53:14",
+      "deliverytime": "2019-05-11 13:53:14"
+    },
+    {
+      "reponsecode": 1,
+      "reponsedescription": "success",
+      "messageid": "jgkgjf4g5r4e5r5752f8c1180cc2090f",
+      "mobileno": "+237678018812",
+      "status": 1,
+      "submittime": "2019-05-11 13:53:13",
+      "senttime": "2019-05-11 13:53:14",
+      "deliverytime": "2019-05-11 13:53:14"
+    }
+  ]
+}

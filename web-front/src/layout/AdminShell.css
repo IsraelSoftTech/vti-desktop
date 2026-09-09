@@ -1,0 +1,244 @@
+:root {
+  --admin-sidebar-width: var(--shell-sidebar-width);
+  --admin-header-height: var(--shell-header-height);
+}
+
+.admin-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  background: transparent;
+}
+
+body.admin-nav-open {
+  overflow: hidden;
+}
+
+/* ——— Sidebar ——— */
+.admin-shell__sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 200;
+  width: min(var(--admin-sidebar-width), 88vw);
+  max-width: var(--admin-sidebar-width);
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-105%);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-shell__sidebar--open {
+  transform: translateX(0);
+}
+
+.admin-shell__sidebar-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100dvh;
+  padding: 12px 12px 20px;
+}
+
+.admin-shell__drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 4px 12px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.admin-shell__drawer-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--color-primary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-shell__drawer-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 12px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.admin-shell__drawer-close:hover {
+  background: var(--color-border);
+}
+
+.admin-shell__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.admin-shell__nav-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 14px;
+  padding: 12px 12px;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--color-text);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.admin-shell__nav-item:hover {
+  background: var(--color-primary-soft);
+}
+
+.admin-shell__nav-item--active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: var(--font-weight-bold);
+}
+
+.admin-shell__nav-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: var(--color-background);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-primary);
+}
+
+.admin-shell__nav-item--active .admin-shell__nav-icon {
+  background: var(--color-surface);
+}
+
+.admin-shell__nav-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.admin-shell__nav-label {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.admin-shell__nav-desc {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  line-height: 1.35;
+}
+
+.admin-shell__nav-item--active .admin-shell__nav-desc {
+  color: var(--color-primary);
+  opacity: 0.75;
+}
+
+.admin-shell__sidebar-foot {
+  margin-top: auto;
+  padding: 16px 12px 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.admin-shell__user-name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.admin-shell__user-role {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.admin-shell__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  border: none;
+  padding: 0;
+  background: var(--color-overlay);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  cursor: pointer;
+}
+
+.admin-shell__backdrop--visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ——— Main column ——— */
+.admin-shell__main {
+  flex: 1;
+  min-width: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-shell__content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ——— Desktop: persistent sidebar ——— */
+@media (min-width: 1024px) {
+  .admin-shell__sidebar {
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    transform: none;
+    flex-shrink: 0;
+    box-shadow: none;
+  }
+
+  .admin-shell__drawer-head {
+    display: none;
+  }
+
+  .admin-shell__drawer-close {
+    display: none;
+  }
+
+  .admin-shell__backdrop {
+    display: none;
+  }
+
+  .admin-shell__content {
+    padding: 0;
+  }
+}
+
+@media (min-width: 1280px) {
+  .admin-shell__sidebar-inner {
+    padding: 20px 14px 24px;
+  }
+}

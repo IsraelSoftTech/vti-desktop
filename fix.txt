@@ -1,0 +1,311 @@
+MPASAT CRITICAL FIXES — ALGORITHM
+=================================
+Do not implement ad-hoc. Follow each fix to the end, then verify that section.
+Storage vs display: keep API/DB times as 24-hour HH:mm and ISO. Only what humans
+see (screens, PDFs, SMS) must be 12-hour.
+
+Do not add google-services.json or FCM. That previously broke APK install.
+On-screen parent alerts = local / OS notifications with the phone default sound.
+
+
+SCOPE
+-----
+A  SYSTEM   discount math, 12-hour display, parent notice payload
+B  MOBILE   login, accountant tabs, chat send, parent settings, on-screen alerts
+C  WEB      discount rows, 12-hour display (same rules as mobile)
+D  BUILD    parent notification change needs a new preview APK (native perms)
+
+
+FIX 1 — Parent on-screen notification (no custom sounds)
+--------------------------------------------------------
+Problem
+  Parents have an inbox but no phone banner. Settings offer custom wav sounds.
+  Lock-screen FCM is off (no Firebase). User wants the notice on screen using
+  the phone’s own notification sound.
+
+Goal
+  When a new parent notice (or school chat) arrives, a system notification
+  appears (heads-up / shade) with the OS default sound. Remove the sound picker.
+
+Do not
+  Re-enable FCM, POST_NOTIFICATIONS blocked-and-forgotten, or custom .wav channels.
+  Prompt for notification permission on the login screen.
+
+Algorithm
+  1. Native (mobile-front/app.json + package.json)
+     a. Remove expo-notifications from autolinking.exclude (root and android).
+     b. Keep plugins/withSafeAndroidNotifications.js: DELETE FirebaseInitProvider
+        / ExpoFirebaseMessagingService / FCM receivers if present; never insert
+        tools:node=remove stubs.
+     c. Remove POST_NOTIFICATIONS from android.blockedPermissions.
+     d. Add a plugin or expo-notifications config for ONE Android channel:
+          id: parent-alerts
+          name: Student alerts
+          importance: HIGH (heads-up)
+          sound: default   (not chime.wav / custom files)
+          vibration: OS default
+     e. Do not ship assets/sounds as notification channel sounds.
+
+  2. JS notify helper (replace custom-sound path in
+     mobile-front/src/notifications/parentPush.ts)
+     a. Lazy-require expo-notifications inside try/catch (native may still miss
+        on an old binary).
+     b. setupParentAlerts():
+          - Android: create the single default-sound channel.
+          - setNotificationHandler: show banner + list + play OS sound.
+     c. requestParentAlertPermission(): call only after parent is logged in
+        (ParentShell first mount), not at login.
+     d. presentParentAlert({ title, body, data }):
+          Notifications.scheduleNotificationAsync now, sound: 'default',
+          channelId parent-alerts. Dedupe by notification id so a 30s poll
+          does not spam.
+     e. Delete previewParentSound, PARENT_SOUND channel loop, custom file names.
+     f. registerParentPushToken stays a no-op (no Expo push token, no FCM).
+
+  3. When to fire (mobile-front/src/navigation/ParentShell.tsx)
+     a. Keep existing 30s unread poll + inbox load.
+     b. After each unread fetch, if unreadCount (or latest item id) increased
+        versus lastSeen, call presentParentAlert with the newest item title/body.
+     c. Same for chatUnreadCount increase (title: school chat).
+     d. If the parent is already on that screen, still show the OS notification
+        unless the app is focused on that exact thread — then skip duplicate.
+     e. Tapping the notification opens inbox / chat (existing nav refs).
+
+  4. Remove sound settings
+     a. mobile-front ParentSettingsScreen: delete “In-app alert sound” list,
+        getParentSettings/updateParentSettings sound UI, previewParentSound import.
+        Keep Privacy Policy + Delete account.
+     b. Leave backend GET/POST /parent/settings in place (ignore body) so old
+        clients do not 404. Do not show the sound on web/mobile.
+
+  5. Rebuild
+     Sideload APK required (preview profile). Confirm extractNativeLibs still
+     true (useLegacyPackaging). Install test: notice appears on screen with the
+     phone’s default sound; settings has no sound list.
+     Phone test is blocked until a preview APK upload succeeds from this
+     network. Two EAS uploads (20 Aug 2026) reset to Google Cloud
+     (write ECONNRESET) at 66 MB then 22 MB of 71 MB. Code for steps 1–4
+     and 6 is in the repo. Queue the APK locally:
+       cd mobile-front
+       npx eas build -p android --profile preview
+     Then inspect extractNativeLibs=true and install as below.
+       - Uninstall leftover com.vtispace.mpasat, install this preview APK only.
+       - Parent login: allow notifications if asked (not on the login screen).
+       - Settings has Privacy Policy + Delete account. No sound list.
+       - With the app open (or just after leaving it), trigger a student
+         check-in or school chat. A system banner should use the phone sound.
+       - Force-stop / swipe away MPASAT, then trigger another notice: do NOT
+         expect a lock-screen push. That is Fix 1 step 6, not a bug.
+
+  6. Honest limit
+     Alerts fire while the app is running or recently backgrounded (poll).
+     True lock-screen push when the app is killed still needs Firebase later.
+     Do not promise that in this pass.
+     Copy/support rule: never tell a school that parents will get alerts if
+     they have not opened MPASAT. Inbox still loads when they next open the app.
+
+
+FIX 2 — Discount applies to TOTAL only (entire fee system)
+----------------------------------------------------------
+Problem
+  mobile-back/feeHelpers.js applyLumpDiscountToHeads() splits the lump discount
+  across every fee type (Tuition, Books, …). Accountant sees each line cut.
+  User: discount is on the total fee only, never on a fee type.
+
+Invariant after fix
+  Per fee type: expected, paid, type-balance = max(0, expected − paid).
+                discountAmount on a head is always 0.
+  Student summary: totalExpected = sum(expected)
+                   discountAmount = min(saved discount, totalExpected)
+                   totalPaid = sum(paid)
+                   totalBalance = max(0, totalExpected − discountAmount − totalPaid)
+  Payment cap still uses min(type-balance, summary.totalBalance) so they cannot
+  overpay the net amount due.
+
+Algorithm
+  1. mobile-back/feeHelpers.js
+     a. Stop calling applyLumpDiscountToHeads for records.
+     b. After computing per-head expected/paid/balance (gross, no discount):
+          discountAmount = min(rawDiscount, totalExpected)
+          totalBalance = max(0, totalExpected − discountAmount − totalPaid)
+     c. Do not call alignHeadBalancesToTotal to push the discount into lines.
+     d. Keep discountAmount: 0 and netExpected = expectedAmount on each head.
+     e. Keep computeMaxPaymentAmount:
+          max = min(head.balance, summary.totalBalance)
+        so a 10 000 total discount still reduces how much can be collected.
+     f. Reports / parent fee overview must use summary.discountAmount and
+        summary.totalBalance, not sum of head.discountAmount.
+
+  2. Delete or leave unused applyLumpDiscountToHeads only after nothing imports it.
+
+  3. Display (same rule on mobile + web)
+     a. FeeRecordView (mobile-front and web-front): Discount column on a fee-type
+        row is "—" or hidden. Summary still shows one Discount figure.
+     b. feeRecordPdf.ts (mobile + web): no per-head discount cells; one summary
+        discount box.
+     c. Accountant Discount screen copy: “Applies to the student’s total fees
+        for the year, not to each fee type.”
+
+  4. Do not change attendance_fee_discounts table. Amount is already a lump sum
+     (student or class). Only allocation/display was wrong.
+
+  5. Verify with numbers
+     Tuition 50 000, Books 10 000, discount 10 000, paid 0
+       Lines: 50 000 / 10 000 unchanged
+       Summary: expected 60 000, discount 10 000, balance 50 000
+       Max pay on Tuition: min(50 000, 50 000) = 50 000
+       After paying 50 000 tuition: type tuition paid, totalBalance 0.
+
+
+FIX 3 — Login screen fits; fields stay visible while typing (mobile)
+--------------------------------------------------------------------
+Problem
+  LoginScreen.tsx packs a large header, 6 feature rows, then username/password.
+  KeyboardAvoidingView is padding on iOS only (Android undefined). Fields slide
+  under the keyboard or off the card.
+
+Algorithm
+  1. mobile-front/src/screens/LoginScreen.tsx
+     a. Remove the FEATURES / PARENT_FEATURES list from the login card
+        (or collapse to one subtitle line). Sign-in first, marketing never.
+     b. Shrink header (less paddingBottom / radius). Keep school name + Sign in.
+     c. KeyboardAvoidingView: behavior="padding" on BOTH iOS and Android.
+        keyboardVerticalOffset = insets.top.
+     d. ScrollView: keyboardShouldPersistTaps="handled",
+        keyboardDismissMode="on-drag",
+        automaticallyAdjustKeyboardInsets={true} (iOS),
+        contentContainerStyle paddingBottom = insets.bottom + 48 + keyboard height
+        if needed (Keyboard.addListener).
+     e. On focus of username/password, scrollToEnd or scroll the focused field
+        into view (onFocus -> setTimeout scrollRef.scrollToEnd).
+  2. TextField.tsx: keep inputs in a single row; overflow hidden on the TextInput
+     (not the card). Do not shrink font below 16px (Android zoom).
+  3. app.json already has softwareKeyboardLayoutMode: "resize". Do not change
+     to pan.
+  4. Verify on a small phone: tap password, both fields and Sign in stay on screen.
+
+
+FIX 4 — Accountant bottom tabs: 5 visible, rest in More (mobile)
+----------------------------------------------------------------
+Problem
+  AccountantTabParamList shows 8 tabs (Home, Students, Management, Payment,
+  Check, Discount, Reports, More). Labels crush. User wants 5 + More.
+
+Visible five
+  Home | Students | Payment | Check | More
+
+Move into More
+  Fee management, Discount, Reports
+  (Messages already lives in ACCOUNTANT_MENU.)
+
+Algorithm
+  1. mobile-front/src/navigation/MainTabs.tsx
+     a. Accountant navigator screens that stay as tabs: Home, Students,
+        Payment, Check, More.
+     b. Do not register Management, Discount, Reports as tab screens.
+        Keep the screen components; open them from More (no missing routes).
+     c. Hide extra screens with href: null ONLY if they must stay in the
+        navigator for nested navigation; prefer not registering them as tabs.
+
+  2. mobile-front/src/screens/MoreScreen.tsx
+     a. Extend MenuItem id with "management" | "discount" | "feeReports".
+     b. ACCOUNTANT_MENU order:
+          Management  (FeeManagementScreen)
+          Discount    (FeeDiscountScreen)
+          Reports     (FeeReportsScreen)
+          Messages    (existing)
+     c. Reuse SubHeader + embedded wrap (same as reports/messages today).
+     d. Blur listener still resets to the More menu.
+
+  3. AccountantHomeScreen shortcuts that used tab.navigate("Discount") etc.
+     must navigate to More and open that panel, or use a stack. Grep
+     navigate("Management"|"Discount"|"Reports") and retarget.
+
+  4. Admin tabs stay at 5 (Home, Students, Academics, Attendance, More).
+     Do not change parent tabs in this fix.
+
+
+FIX 5 — Chat send icon always visible while typing (mobile)
+-----------------------------------------------------------
+Problem
+  ChatThread.tsx send button is position:"absolute" (right/bottom) with
+  paddingRight: 56 on the composer. Keyboard + absolute bottom + tab bar
+  hides the send icon.
+
+Algorithm
+  1. Composer layout (ChatThread.tsx)
+     a. Remove position absolute from sendBtn. Put send as the last child in
+        the row: [attach] [emoji] [TextInput flex] [send].
+     b. Remove paddingRight: 56 that reserved space for the overlay button.
+     c. sendBtn: relative, flexShrink 0, fixed 44×44, alignSelf flex-end.
+  2. Keyboard
+     a. Keep KeyboardAvoidingView wrapping the thread (already imported).
+        behavior padding (iOS) / padding (Android). keyboardVerticalOffset
+        = header height, not the tab bar (tabBarHideOnKeyboard is true).
+     b. Do not use Keyboard.addListener padding that pushes send off-screen.
+        composerPad = 8 + min(insets.bottom, 8) only when keyboard is hidden;
+        when keyboard is visible, composerPad = 8 (no double safe-area).
+  3. TextInput
+     a. multiline stays. maxHeight 110.
+     b. The send button stays aligned to the bottom of the input, never
+        covered by the emoji tray (tray opens above composer, not over send).
+  4. Same composer is used by parent chat and admin parent-chat. One fix covers
+     both. Verify: type a message, send stays tappable above the keyboard.
+
+
+FIX 6 — 12-hour time everywhere humans read it (entire system)
+--------------------------------------------------------------
+Rule
+  Store and accept 24-hour HH:mm in APIs and DB (school start 07:30).
+  Display 12-hour with AM/PM (7:30 AM). Do not persist "7:30 AM" in the database.
+
+Shared display helper
+  hour: "numeric", minute: "2-digit", hour12: true
+  Timezone Africa/Douala for school-clock times (attendance, parent day, SMS).
+  Locale en-GB or en-US is fine as long as AM/PM is visible.
+
+Algorithm
+  1. Add formatTime12 / formatDateTime12 in:
+       mobile-front/src/utils/dateTime.ts
+       web-front/src/utils/dateTime.ts
+       mobile-back/cameroonClock.js  (formatHHMM12 for SMS and reports)
+     formatTimeDisplay, formatDateTimeDisplay, formatDoualaHHMM must call the
+     12-hour helper (stop hourCycle: "h23" in UI formatters).
+  2. Time pickers (mobile TimePickerField, web TimePickerField)
+     Keep value as HH:mm 24-hour in onChange.
+     Label/button text: formatTime12Display(value), not "(HH:mm)".
+  3. Replace leftover toLocaleTimeString without hour12: true
+     Grep mobile-front, web-front (ignore node_modules):
+       toLocaleTimeString, formatDoualaHHMM, "HH:mm", hourCycle
+     Screens: TakeAttendanceTab, LogsScreen, MessagesScreen, SettingsScreen,
+     ParentStudentDayScreen, ParentNotificationsScreen.
+  4. SMS / reports (mobile-back)
+     smsService.js formatTimeFromIso, reportMetrics.js formatTimeFromIso:
+     output 7:30 AM not 07:30.
+     Pair-summary and miss SMS must use the same helper.
+  5. Copy
+     ParentStudentDayScreen “Times in Africa/Douala (HH:mm)” → “12-hour, Cameroon time”.
+     Settings school-hours line shows 7:30 AM–3:30 PM, still saves 07:30 / 15:30.
+  6. Do not change validation in routes.js (“must be HH:mm”) — that is storage.
+
+
+ORDER
+-----
+  1. FIX 2 discount (backend first, then both UIs) — money must be correct.
+  2. FIX 6 12-hour helpers, then call sites.
+  3. FIX 3 login, FIX 4 tabs, FIX 5 chat — mobile-only, no API.
+  4. FIX 1 notifications last — needs EAS preview rebuild + phone test.
+
+Do not mix a Firebase experiment into 3–5.
+
+
+VERIFY
+------
+  Discount: 50k + 10k types, 10k discount → lines uncut, due 50k.
+  Login: keyboard does not cover username/password/Sign in.
+  Accountant: exactly 5 tab buttons; Management/Discount/Reports open from More.
+  Chat: send icon visible and tappable while the keyboard is open.
+  Parent: no sound picker; a new notice shows a phone notification with the
+          default sound while the app is open or recently used. Not when the
+          app is killed (FCM later).
+  After FIX 1: new preview APK still installs (extractNativeLibs true).
