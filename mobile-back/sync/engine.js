@@ -20,6 +20,12 @@ const DEFAULT_CLOUD_URL = (
   process.env.DESKTOP_CLOUD_URL || 'https://api.vtispace.com'
 ).replace(/\/$/, '');
 
+// Bump when a table is added to SYNC_TABLES after devices already applied a
+// snapshot. Incremental pull cannot invent changelog rows that were never
+// logged (or were skipped by an older overlay), so a stale schema version
+// re-applies the cloud snapshot once.
+const SYNC_SCHEMA_VERSION = 2;
+
 let inFlight = false;
 let pullJob = null;
 let pushJob = null;
@@ -445,6 +451,24 @@ function needsSnapshot() {
   return true;
 }
 
+function currentSyncSchemaVersion() {
+  return Number(getMeta('sync_schema_version') || 0);
+}
+
+function markSyncSchemaCurrent() {
+  setMeta('sync_schema_version', String(SYNC_SCHEMA_VERSION));
+}
+
+function needsSchemaCatchUp() {
+  return currentSyncSchemaVersion() < SYNC_SCHEMA_VERSION;
+}
+
+async function pullAndApplySnapshot() {
+  const snapshot = await cloudFetch('/api/sync/snapshot', { timeoutMs: 120000 });
+  await applySnapshot(snapshot);
+  markSyncSchemaCurrent();
+}
+
 function busyError(action) {
   const err = new Error(`Please wait until the current ${action} finishes.`);
   err.code = 'busy';
@@ -460,9 +484,8 @@ async function pullFromCloud(opts = {}) {
     try {
       await assertOnline();
       await ensurePaired(opts);
-      if (needsSnapshot()) {
-        const snapshot = await cloudFetch('/api/sync/snapshot', { timeoutMs: 120000 });
-        await applySnapshot(snapshot);
+      if (needsSnapshot() || needsSchemaCatchUp()) {
+        await pullAndApplySnapshot();
       } else {
         await pullChanges();
       }
@@ -584,9 +607,8 @@ async function connectToCloud({ cloudBaseUrl, pairingCode, username, password } 
   setMeta('cloud_url', base);
   setStatus({ paired: false, state: 'syncing', message: 'Syncing updates', error: null });
   await ensurePaired({ cloudBaseUrl: base, pairingCode, username, password });
-  if (isPristine() || needsSnapshot()) {
-    const snapshot = await cloudFetch('/api/sync/snapshot', { timeoutMs: 120000 });
-    await applySnapshot(snapshot);
+  if (isPristine() || needsSnapshot() || needsSchemaCatchUp()) {
+    await pullAndApplySnapshot();
   } else {
     await pushOutbox();
     await pullChanges();

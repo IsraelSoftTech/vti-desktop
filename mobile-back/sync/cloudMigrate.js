@@ -138,9 +138,34 @@ async function ensureSyncInfra() {
   }
 }
 
+async function backfillDepartmentChangelog() {
+  await runDdl(`
+    CREATE TABLE IF NOT EXISTS sync_migrate_flags (
+      key TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  const { rows } = await pool.query(
+    `SELECT 1 FROM sync_migrate_flags WHERE key = $1`,
+    ['changelog_departments_v2']
+  );
+  if (rows.length) return;
+  await pool.query(`
+    INSERT INTO sync_change_log (table_name, uuid, op, row_version)
+    SELECT 'attendance_departments', uuid, 'upsert', COALESCE(row_version, 1)
+    FROM attendance_departments
+    WHERE uuid IS NOT NULL
+  `);
+  await pool.query(
+    `INSERT INTO sync_migrate_flags (key) VALUES ('changelog_departments_v2')
+     ON CONFLICT (key) DO NOTHING`
+  );
+}
+
 async function migrateCloudSync() {
   await ensureSyncColumns();
   await ensureSyncInfra();
+  await backfillDepartmentChangelog();
 }
 
 module.exports = { migrateCloudSync };
