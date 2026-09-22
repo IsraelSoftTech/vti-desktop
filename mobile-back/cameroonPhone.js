@@ -32,8 +32,28 @@ function isCameroonPhone(raw) {
   return Boolean(normalizeCameroonPhone(raw));
 }
 
+/** Last 9 Cameroon mobile digits, or null. */
+function nationalNine(raw) {
+  const canonical = normalizeCameroonPhone(raw);
+  if (canonical) return digitsOnly(canonical).slice(-9);
+  const d = digitsOnly(raw);
+  if (d.length >= 9) {
+    const last = d.slice(-9);
+    if (/^6\d{8}$/.test(last)) return last;
+  }
+  return null;
+}
+
+function phonesMatch(a, b) {
+  const left = nationalNine(a);
+  const right = nationalNine(b);
+  return Boolean(left && right && left === right);
+}
+
 module.exports = {
   digitsOnly,
   normalizeCameroonPhone,
   isCameroonPhone,
+  nationalNine,
+  phonesMatch,
 };

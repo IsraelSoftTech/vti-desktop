@@ -118,6 +118,19 @@ export async function registerParent(fullName: string, phone: string, password: 
   return persistSession(data);
 }
 
+export async function monitorParent(phone: string) {
+  const { res, data } = await apiFetch("/auth/parent-monitor", {
+    method: "POST",
+    body: JSON.stringify({ phone }),
+  });
+
+  if (!res.ok) {
+    throw new Error(data.error || "Could not open parent access");
+  }
+
+  return persistSession(data);
+}
+
 export async function fetchMe() {
   const { res, data } = await apiFetch("/auth/me");
   if (!res.ok) return null;

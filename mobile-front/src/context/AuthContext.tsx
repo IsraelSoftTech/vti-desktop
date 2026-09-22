@@ -11,7 +11,7 @@ import {
   fetchMe,
   login as apiLogin,
   logout as apiLogout,
-  registerParent as apiRegisterParent,
+  monitorParent as apiMonitorParent,
   type AttendanceUser,
 } from "../api/auth";
 
@@ -20,7 +20,7 @@ type AuthContextValue = {
   loading: boolean;
   signingIn: boolean;
   login: (username: string, password: string) => Promise<void>;
-  register: (fullName: string, phone: string, password: string) => Promise<void>;
+  monitor: (phone: string) => Promise<void>;
   refreshUser: () => Promise<void>;
   logout: () => Promise<void>;
 };
@@ -59,18 +59,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const register = useCallback(
-    async (fullName: string, phone: string, password: string) => {
-      setSigningIn(true);
-      try {
-        const session = await apiRegisterParent(fullName, phone, password);
-        setUser(session);
-      } finally {
-        setSigningIn(false);
-      }
-    },
-    []
-  );
+  const monitor = useCallback(async (phone: string) => {
+    setSigningIn(true);
+    try {
+      const session = await apiMonitorParent(phone);
+      setUser(session);
+    } finally {
+      setSigningIn(false);
+    }
+  }, []);
 
   const refreshUser = useCallback(async () => {
     const me = await fetchMe();
@@ -83,8 +80,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, signingIn, login, register, refreshUser, logout }),
-    [user, loading, signingIn, login, register, refreshUser, logout]
+    () => ({ user, loading, signingIn, login, monitor, refreshUser, logout }),
+    [user, loading, signingIn, login, monitor, refreshUser, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

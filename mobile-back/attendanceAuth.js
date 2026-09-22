@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const bcrypt = require('./bcryptCompat');
 const { pool } = require('./db');
 const { normalizeCameroonPhone } = require('./cameroonPhone');
@@ -120,6 +121,71 @@ async function registerParentUser({ fullName, phone, password }) {
     }
     throw e;
   }
+}
+
+async function openParentByPhone(phone) {
+  if (isDesktop()) {
+    const err = new Error('Parent features run on the school server, not on desktop.');
+    err.status = 400;
+    throw err;
+  }
+
+  const username = normalizeCameroonPhone(phone);
+  if (!username) {
+    const err = new Error(
+      'Enter a valid Cameroon mobile number (e.g. 6XX XX XX XX or +237…).'
+    );
+    err.status = 400;
+    throw err;
+  }
+
+  const parentStudents = require('./parentStudents');
+  const matches = await parentStudents.findStudentsByContact(username);
+  if (!matches.length) {
+    const err = new Error(
+      'No student is registered with that phone number. Use the number printed on the ID card.'
+    );
+    err.status = 404;
+    throw err;
+  }
+
+  let user = await findUserByLogin(username);
+  if (user && user.role !== PARENT_ROLE) {
+    const err = new Error('This number belongs to a staff account. Sign in with your staff username.');
+    err.status = 409;
+    throw err;
+  }
+
+  if (!user) {
+    const passwordHash = await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 12);
+    const guardianName = String(matches[0].guardian_name || '').trim() || 'Parent';
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO attendance_users
+           (username, password_hash, full_name, role, first_run_completed)
+         VALUES ($1, $2, $3, $4, TRUE)
+         RETURNING *`,
+        [username, passwordHash, guardianName.slice(0, 255), PARENT_ROLE]
+      );
+      user = rows[0];
+    } catch (e) {
+      if (e.code === '23505') {
+        user = await findUserByLogin(username);
+      } else {
+        throw e;
+      }
+    }
+  }
+
+  if (!user || user.role !== PARENT_ROLE) {
+    const err = new Error('Could not open the parent account for this number.');
+    err.status = 500;
+    throw err;
+  }
+
+  await parentStudents.linkStudentsByContact(user.id, username);
+  const refreshed = await pool.query('SELECT * FROM attendance_users WHERE id = $1', [user.id]);
+  return refreshed.rows[0] || user;
 }
 
 async function ensureBootstrapAccountant() {
@@ -282,6 +348,7 @@ module.exports = {
   findUserByLogin,
   publicUserFields,
   registerParentUser,
+  openParentByPhone,
   changeOwnPassword,
   ensureBootstrapAccountant,
 };

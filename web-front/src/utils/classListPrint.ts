@@ -23,10 +23,17 @@ const COLS: { title: string; w: number; align: ColAlign }[] = [
   { title: "Barcode", w: 24, align: "center" },
   { title: "Sex", w: 10, align: "center" },
   { title: "Date of birth", w: 22, align: "center" },
-  { title: "Place of birth", w: 28, align: "left" },
+  { title: "Department/Trade", w: 28, align: "left" },
   { title: "Guardian", w: 28, align: "left" },
   { title: "Contact", w: 24, align: "center" },
 ];
+
+function sexInitial(sex: string | null | undefined) {
+  const value = String(sex || "").trim().toLowerCase();
+  if (value === "female" || value === "f") return "F";
+  if (value === "male" || value === "m") return "M";
+  return sex?.trim() || "—";
+}
 
 function innerWidth() {
   return PAGE_W - MARGIN * 2;
@@ -64,9 +71,9 @@ function buildClassListPdf(options: {
       String(i + 1),
       s.fullName || "—",
       s.barcode || "—",
-      s.sex || "—",
+      sexInitial(s.sex),
       formatDobDisplay(s.dob),
-      s.placeOfBirth || "—",
+      s.department || "—",
       s.guardianName || "—",
       s.contact || "—",
     ];

@@ -17,10 +17,13 @@ import TextField from "../../components/TextField";
 import ConfirmModal from "../../components/ConfirmModal";
 import {
   addParentStudent,
+  getParentStudentFees,
   listParentStudents,
   unlinkParentStudent,
   type LinkedStudent,
 } from "../../api/parent";
+import type { FeeRecord } from "../../api/fees";
+import FeeRecordView from "../../components/FeeRecordView";
 import { useCachedQuery } from "../../hooks/useCachedQuery";
 import { clearCache, setCache } from "../../utils/cache";
 import { useColors } from "../../theme/ThemeContext";
@@ -37,6 +40,9 @@ export default function ParentHomeScreen() {
   const [formError, setFormError] = useState("");
   const [toRemove, setToRemove] = useState<LinkedStudent | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [record, setRecord] = useState<FeeRecord | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [openingId, setOpeningId] = useState<number | null>(null);
 
   const loader = useCallback(async () => {
     const data = await listParentStudents();
@@ -48,6 +54,19 @@ export default function ParentHomeScreen() {
   );
 
   const students = data || [];
+
+  async function openStudent(student: LinkedStudent) {
+    setLoadError("");
+    setOpeningId(student.id);
+    try {
+      const rec = await getParentStudentFees(student.id);
+      setRecord(rec);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Could not load student record");
+    } finally {
+      setOpeningId(null);
+    }
+  }
 
   async function applyStudents(next: LinkedStudent[]) {
     setCache("parent-students", next);
@@ -92,6 +111,34 @@ export default function ParentHomeScreen() {
     } finally {
       setRemoving(false);
     }
+  }
+
+  if (record) {
+    return (
+      <ParentScreenLayout>
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          <Pressable onPress={() => setRecord(null)} style={styles.backRow}>
+            <Ionicons name="chevron-back" size={20} color={colors.primary} />
+            <Text style={styles.backText}>Students</Text>
+          </Pressable>
+          <View style={styles.card}>
+            <StudentAvatar studentId={record.student.id} size={52} />
+            <View style={styles.cardBody}>
+              <Text style={styles.name}>{record.student.fullName}</Text>
+              <Text style={styles.meta}>{record.student.className || "No class"}</Text>
+              <Text style={styles.barcode}>{record.student.barcode}</Text>
+            </View>
+          </View>
+          <Text style={styles.readonly}>Read-only</Text>
+          <FeeRecordView
+            record={record}
+            showPrint={false}
+            showBreakdown={false}
+            managePayments={false}
+          />
+        </ScrollView>
+      </ParentScreenLayout>
+    );
   }
 
   if (adding) {
@@ -154,6 +201,12 @@ export default function ParentHomeScreen() {
           disabled={students.length >= MAX_STUDENTS}
         />
 
+        {loadError ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{loadError}</Text>
+          </View>
+        ) : null}
+
         {error && !data ? (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{error}</Text>
@@ -169,19 +222,25 @@ export default function ParentHomeScreen() {
           <View style={styles.list}>
             {students.map((s) => (
               <View key={s.id} style={styles.card}>
-                <StudentAvatar studentId={s.id} photoUrl={s.photoUrl} size={58} />
-                <View style={styles.cardBody}>
-                  <Text style={styles.name} numberOfLines={1}>
-                    {s.fullName}
-                  </Text>
-                  <Text style={styles.meta} numberOfLines={1}>
-                    {s.className || "No class"}
-                  </Text>
-                  <View style={styles.barcodeChip}>
-                    <Ionicons name="barcode-outline" size={14} color={colors.secondary} />
-                    <Text style={styles.barcode}>{s.barcode}</Text>
+                <Pressable
+                  style={styles.cardTap}
+                  onPress={() => void openStudent(s)}
+                  disabled={openingId != null}
+                >
+                  <StudentAvatar studentId={s.id} photoUrl={s.photoUrl} size={58} />
+                  <View style={styles.cardBody}>
+                    <Text style={styles.name} numberOfLines={1}>
+                      {s.fullName}
+                    </Text>
+                    <Text style={styles.meta} numberOfLines={1}>
+                      {s.className || "No class"}
+                    </Text>
+                    <View style={styles.barcodeChip}>
+                      <Ionicons name="barcode-outline" size={14} color={colors.secondary} />
+                      <Text style={styles.barcode}>{s.barcode}</Text>
+                    </View>
                   </View>
-                </View>
+                </Pressable>
                 <Pressable
                   onPress={() => setToRemove(s)}
                   style={styles.removeBtn}
@@ -230,6 +289,8 @@ function createStyles(colors: AppColors) {
     borderWidth: 1,
     borderColor: colors.border,
   },
+  cardTap: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 12 },
+  readonly: { fontSize: 12, fontWeight: "700", color: colors.textMuted, textTransform: "uppercase" },
   cardBody: { flex: 1, minWidth: 0 },
   name: { fontSize: 16, fontWeight: "800", color: colors.primary },
   meta: { marginTop: 2, fontSize: 13, color: colors.textSub },

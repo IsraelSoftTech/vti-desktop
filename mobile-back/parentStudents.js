@@ -1,6 +1,7 @@
 const { pool } = require('./db');
 const { getActiveAcademicYear } = require('./helpers');
 const { formatHHMM12, todayISO, dateISO, formatDateDDMM } = require('./cameroonClock');
+const { phonesMatch } = require('./cameroonPhone');
 
 const MISSING_TIME = '--:--';
 
@@ -73,6 +74,54 @@ async function listLinkedStudents(parentUserId) {
     [parentUserId]
   );
   return rows.map(mapLinkedStudent);
+}
+
+async function findStudentsByContact(phone) {
+  const year = await getActiveAcademicYear();
+  if (!year) {
+    const err = new Error('No active academic year. Create one and set it active first.');
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows } = await pool.query(
+    `SELECT s.*, c.name AS class_name
+     FROM attendance_students s
+     LEFT JOIN attendance_classes c ON c.id = s.class_id
+     WHERE s.academic_year_id = $1
+       AND s.contact IS NOT NULL
+       AND TRIM(s.contact) <> ''
+     ORDER BY s.full_name ASC`,
+    [year.id]
+  );
+  return rows.filter((row) => phonesMatch(row.contact, phone));
+}
+
+async function linkStudentsByContact(parentUserId, phone) {
+  const matches = await findStudentsByContact(phone);
+  if (!matches.length) {
+    const err = new Error(
+      'No student is registered with that phone number. Use the number printed on the ID card.'
+    );
+    err.status = 404;
+    throw err;
+  }
+
+  const toLink = matches.slice(0, 10);
+  for (const student of toLink) {
+    await pool.query(
+      `INSERT INTO attendance_parent_students (parent_user_id, student_id, barcode)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (parent_user_id, student_id) DO NOTHING`,
+      [parentUserId, student.id, student.barcode]
+    );
+  }
+
+  await markFirstRunComplete(parentUserId);
+  return {
+    students: await listLinkedStudents(parentUserId),
+    firstRunCompleted: true,
+  };
 }
 
 async function linkBarcodes(parentUserId, rawBarcodes) {
@@ -402,6 +451,8 @@ async function getLinkedStudentPhotoUrl(parentUserId, studentId) {
 module.exports = {
   listLinkedStudents,
   linkBarcodes,
+  linkStudentsByContact,
+  findStudentsByContact,
   addLinkedBarcode,
   unlinkStudent,
   getLinkedStudentDay,

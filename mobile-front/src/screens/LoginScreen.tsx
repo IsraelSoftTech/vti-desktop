@@ -26,17 +26,15 @@ export default function LoginScreen() {
   const colors = useColors();
   const { scheme } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { login, register, signingIn } = useAuth();
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const { login, monitor, signingIn } = useAuth();
+  const [mode, setMode] = useState<"login" | "monitor">("login");
   const [username, setUsername] = useState("");
-  const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [keyboardOpen, setKeyboardOpen] = useState(false);
 
-  const isRegister = mode === "register";
+  const isMonitor = mode === "monitor";
 
   useEffect(() => {
     const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -52,17 +50,13 @@ export default function LoginScreen() {
   async function handleSubmit() {
     setError("");
     try {
-      if (isRegister) {
-        if (password !== confirm) {
-          setError("Passwords do not match.");
-          return;
-        }
-        await register(fullName.trim(), phone.trim(), password);
+      if (isMonitor) {
+        await monitor(phone.trim());
       } else {
         await login(username.trim(), password);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : isRegister ? "Registration failed" : "Login failed");
+      setError(err instanceof Error ? err.message : isMonitor ? "Could not open parent access" : "Login failed");
     }
   }
 
@@ -90,66 +84,48 @@ export default function LoginScreen() {
         >
           <View style={styles.card}>
             <MpasatWordmark />
-            <Text style={styles.formTitle}>{isRegister ? "Register" : "Sign in"}</Text>
+            <Text style={styles.formTitle}>{isMonitor ? "Monitor my child" : "Sign in"}</Text>
             <Text style={styles.cardSubtitle}>
-              {isRegister
-                ? "Phone number is your login. Staff should sign in instead."
+              {isMonitor
+                ? "Enter Phone Number as seen on student’s ID Card"
                 : "Staff username or parent phone"}
             </Text>
 
             <View style={styles.form}>
-              {isRegister ? (
-                <>
-                  <TextField
-                    label="Full name"
-                    value={fullName}
-                    onChangeText={setFullName}
-                    autoCapitalize="words"
-                    placeholder="Your full name"
-                    returnKeyType="next"
-                  />
-                  <TextField
-                    label="Cameroon phone"
-                    value={phone}
-                    onChangeText={setPhone}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    keyboardType="phone-pad"
-                    placeholder="6XX XX XX XX"
-                    returnKeyType="next"
-                  />
-                </>
-              ) : (
+              {isMonitor ? (
                 <TextField
-                  label="Username or phone"
-                  value={username}
-                  onChangeText={setUsername}
+                  label="Phone number"
+                  value={phone}
+                  onChangeText={setPhone}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  placeholder="Staff username or parent phone"
-                  returnKeyType="next"
-                />
-              )}
-              <TextField
-                label="Password"
-                value={password}
-                onChangeText={setPassword}
-                placeholder={isRegister ? "At least 6 characters" : "Enter your password"}
-                secureToggle
-                returnKeyType={isRegister ? "next" : "done"}
-                onSubmitEditing={isRegister ? undefined : handleSubmit}
-              />
-              {isRegister ? (
-                <TextField
-                  label="Confirm password"
-                  value={confirm}
-                  onChangeText={setConfirm}
-                  placeholder="Re-enter password"
-                  secureToggle
+                  keyboardType="phone-pad"
+                  placeholder="6XX XX XX XX"
                   returnKeyType="done"
                   onSubmitEditing={handleSubmit}
                 />
-              ) : null}
+              ) : (
+                <>
+                  <TextField
+                    label="Username or phone"
+                    value={username}
+                    onChangeText={setUsername}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="Staff username or parent phone"
+                    returnKeyType="next"
+                  />
+                  <TextField
+                    label="Password"
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="Enter your password"
+                    secureToggle
+                    returnKeyType="done"
+                    onSubmitEditing={handleSubmit}
+                  />
+                </>
+              )}
 
               {error ? (
                 <View style={styles.errorBox}>
@@ -160,11 +136,11 @@ export default function LoginScreen() {
               <PrimaryButton
                 title={
                   signingIn
-                    ? isRegister
-                      ? "Creating account…"
+                    ? isMonitor
+                      ? "Opening…"
                       : "Signing in…"
-                    : isRegister
-                      ? "Create parent account"
+                    : isMonitor
+                      ? "Proceed"
                       : "Sign in"
                 }
                 loading={signingIn}
@@ -174,14 +150,12 @@ export default function LoginScreen() {
               <Pressable
                 onPress={() => {
                   setError("");
-                  setMode(isRegister ? "login" : "register");
+                  setMode(isMonitor ? "login" : "monitor");
                 }}
                 style={styles.switchBtn}
               >
                 <Text style={styles.switchText}>
-                  {isRegister
-                    ? "Already have an account? Sign in"
-                    : "I’m a parent — create an account"}
+                  {isMonitor ? "Staff sign in" : "I’m a parent — Monitor My Child"}
                 </Text>
               </Pressable>
             </View>

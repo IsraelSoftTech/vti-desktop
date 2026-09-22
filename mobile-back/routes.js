@@ -72,6 +72,7 @@ const {
   findUserByLogin,
   publicUserFields,
   registerParentUser,
+  openParentByPhone,
   changeOwnPassword,
   ensureBootstrapAccountant,
   isBootstrapAccountantUsername,
@@ -187,6 +188,24 @@ router.post('/auth/register', async (req, res) => {
     const status = err.status || 500;
     if (status >= 500) console.error('[attendance] register', err);
     return res.status(status).json({ error: err.message || 'Registration failed' });
+  }
+});
+
+router.post('/auth/parent-monitor', async (req, res) => {
+  try {
+    const phone = req.body?.phone;
+    const user = await openParentByPhone(phone);
+    const token = signToken(user);
+    setAuthCookie(res, token);
+    return res.json({
+      ok: true,
+      token,
+      ...publicUserFields(user),
+    });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status >= 500) console.error('[attendance] parent-monitor', err);
+    return res.status(status).json({ error: err.message || 'Could not open parent access' });
   }
 });
 

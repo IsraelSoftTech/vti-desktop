@@ -6,10 +6,13 @@ import TextField from "../../components/TextField";
 import ConfirmModal from "../../components/ConfirmModal";
 import {
   addParentStudent,
+  getParentStudentFees,
   listParentStudents,
   unlinkParentStudent,
   type LinkedStudent,
 } from "../../api/parent";
+import type { FeeRecord } from "../../api/fees";
+import FeeRecordView from "../../components/FeeRecordView";
 import { useCachedQuery } from "../../hooks/useCachedQuery";
 import { clearCache, setCache } from "../../utils/cache";
 import "./parentScreens.css";
@@ -23,6 +26,9 @@ export default function ParentStudentsScreen() {
   const [formError, setFormError] = useState("");
   const [toRemove, setToRemove] = useState<LinkedStudent | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [record, setRecord] = useState<FeeRecord | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [openingId, setOpeningId] = useState<number | null>(null);
 
   const loader = useCallback(async () => {
     const data = await listParentStudents();
@@ -34,6 +40,19 @@ export default function ParentStudentsScreen() {
   });
 
   const students = data || [];
+
+  async function openStudent(student: LinkedStudent) {
+    setLoadError("");
+    setOpeningId(student.id);
+    try {
+      const rec = await getParentStudentFees(student.id);
+      setRecord(rec);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Could not load student record");
+    } finally {
+      setOpeningId(null);
+    }
+  }
 
   async function handleAdd() {
     setFormError("");
@@ -73,6 +92,31 @@ export default function ParentStudentsScreen() {
     } finally {
       setRemoving(false);
     }
+  }
+
+  if (record) {
+    return (
+      <div className="parent-page">
+        <div className="parent-page__inner">
+          <button type="button" className="parent-back" onClick={() => setRecord(null)}>
+            <Icon name="chevron-back" size={20} />
+            Students
+          </button>
+          <div className="parent-student">
+            <StudentAvatar studentId={record.student.id} size={52} />
+            <div className="parent-student__body">
+              <p className="parent-student__name">{record.student.fullName}</p>
+              <p className="parent-student__meta">{record.student.className || "No class"}</p>
+              <p className="parent-student__meta" style={{ color: "var(--color-reserved)", fontWeight: 700 }}>
+                {record.student.barcode}
+              </p>
+            </div>
+          </div>
+          <p className="parent-readonly">Read-only</p>
+          <FeeRecordView record={record} showPrint={false} managePayments={false} />
+        </div>
+      </div>
+    );
   }
 
   if (adding) {
@@ -116,6 +160,8 @@ export default function ParentStudentsScreen() {
           disabled={students.length >= MAX_STUDENTS}
         />
 
+        {loadError ? <div className="parent-error">{loadError}</div> : null}
+
         {error && !data ? (
           <div className="parent-error">{error}</div>
         ) : loading && !data ? (
@@ -128,15 +174,23 @@ export default function ParentStudentsScreen() {
         ) : (
           students.map((s) => (
             <div key={s.id} className="parent-student">
-              <StudentAvatar studentId={s.id} photoUrl={s.photoUrl} size={58} />
-              <div className="parent-student__body">
-                <p className="parent-student__name">{s.fullName}</p>
-                <p className="parent-student__meta">{s.className || "No class"}</p>
-                <span className="parent-barcode-chip">
-                  <Icon name="barcode-outline" size={14} />
-                  {s.barcode}
-                </span>
-              </div>
+              <button
+                type="button"
+                className="parent-student parent-student--tap"
+                style={{ flex: 1, margin: 0, border: "none", background: "transparent", padding: 0 }}
+                disabled={openingId != null}
+                onClick={() => void openStudent(s)}
+              >
+                <StudentAvatar studentId={s.id} photoUrl={s.photoUrl} size={58} />
+                <div className="parent-student__body">
+                  <p className="parent-student__name">{s.fullName}</p>
+                  <p className="parent-student__meta">{s.className || "No class"}</p>
+                  <span className="parent-barcode-chip">
+                    <Icon name="barcode-outline" size={14} />
+                    {s.barcode}
+                  </span>
+                </div>
+              </button>
               <button
                 type="button"
                 className="parent-icon-btn"
