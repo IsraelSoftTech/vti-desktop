@@ -2,12 +2,14 @@
   "schema": 1,
   "version": "2.1.2",
   "minShellVersion": "2.1.0",
-  "commit": "",
-  "releasedAt": "2026-09-10T00:00:00Z",
-  "notes": ["Departments now sync from the school server"],
+  "commit": "fb60490f686cb795acf2893cb372e86d61ab27e2",
+  "releasedAt": "2026-09-10T12:54:23.917Z",
+  "notes": [
+    "Departments now sync from the school server"
+  ],
   "payload": {
     "url": "https://github.com/IsraelSoftTech/vti-desktop/releases/download/desktop-2.1.2/mpasat-desktop-payload-2.1.2.zip",
-    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-    "sizeBytes": 0
+    "sha256": "d2ba24bc6c2796eb39071eb9b44b76329f0f304405445872f805c66fa8ed078f",
+    "sizeBytes": 1337126
   }
 }
