@@ -4,10 +4,6 @@ on:
   push:
     branches: [main, master]
     paths:
-      - "web-front/**"
-      - "!web-front/dist/**"
-      - "mobile-back/**"
-      - "!mobile-back/scripts/**"
       - "desktop/electron/**"
       - "desktop/scripts/**"
       - "desktop/software-manifest.json"
@@ -27,10 +23,24 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout desktop
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
+
+      - name: Checkout web UI
+        uses: actions/checkout@v4
+        with:
+          repository: IsraelSoftTech/attendance-front
+          ref: master
+          path: web-front
+
+      - name: Checkout API
+        uses: actions/checkout@v4
+        with:
+          repository: IsraelSoftTech/attendance-back
+          ref: master
+          path: mobile-back
 
       - name: Setup Node
         uses: actions/setup-node@v4

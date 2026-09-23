@@ -6,6 +6,11 @@ coverage/
 *.log
 *.tsbuildinfo
 
+# Each app is its own git repo. Push from that folder, not from this root.
+/web-front/
+/mobile-back/
+/mobile-front/
+
 .env
 .env.local
 .env*.local
